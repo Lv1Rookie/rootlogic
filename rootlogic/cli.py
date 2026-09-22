@@ -28,6 +28,8 @@ from .llm import AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
 
 console = Console()
+# Brackets are Rich style tags, so the letters must be escaped or they vanish from the prompt.
+PLAN_PROMPT = r"[bold]Plan[/] — \[a]pprove, \[e]dit, \[q]uit"
 HOME = Path(os.environ.get("ROOTLOGIC_HOME", ".rootlogic"))
 
 STYLE = {
@@ -64,8 +66,7 @@ class TerminalUI:
             show_plan(plan)
             if self.auto_approve:
                 return plan
-            choice = Prompt.ask("[bold]Plan[/] — [a]pprove, [e]dit, [q]uit", choices=["a", "e", "q"],
-                                default="a")
+            choice = Prompt.ask(PLAN_PROMPT, choices=["a", "e", "q"], default="a")
             if choice == "a":
                 return plan
             if choice == "q":

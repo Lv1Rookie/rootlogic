@@ -219,3 +219,14 @@ def test_run_can_disable_verification(client):
     wait(client, rid, finished)
     types = [e["type"] for e in sse_events(client, rid)]
     assert "verify.started" not in types and "report.checked" in types
+
+
+def test_plan_prompt_keeps_its_bracketed_letters():
+    """Rich reads [a] as a style tag: unescaped, the prompt renders as 'pprove, dit, uit'."""
+    from rich.console import Console
+
+    from rootlogic.cli import PLAN_PROMPT
+    console = Console(width=80)
+    with console.capture() as capture:
+        console.print(PLAN_PROMPT)
+    assert "[a]pprove, [e]dit, [q]uit" in capture.get()
