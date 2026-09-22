@@ -146,3 +146,19 @@ def test_out_of_credits_is_explained_not_dumped_as_json():
     llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
     with pytest.raises(AuthError, match="Plans & Billing"):
         llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+
+@pytest.mark.parametrize("budget,expect_direct", [(3, True), (8, False)])
+def test_small_search_budgets_bypass_dynamic_filtering(budget, expect_direct):
+    """Dynamic filtering batches searches and can burn a small budget before any result.
+
+    Seen live: --searches 3 returned 'max uses exceeded' with zero sources.
+    """
+    messages = FakeMessages()
+    client = SimpleNamespace(beta=SimpleNamespace(messages=messages))
+    llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 max_searches=budget)
+    web = [t for t in messages.calls[0]["tools"] if t["name"] in ("web_search", "web_fetch")]
+    assert all(("allowed_callers" in t) == expect_direct for t in web)
+    assert web[0]["max_uses"] == budget

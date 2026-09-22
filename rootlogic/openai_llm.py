@@ -110,7 +110,7 @@ class OpenAICompatibleLLM:
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
         box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days)
         specs = WEB_TOOL_SPECS + [("submit_findings", SUBMIT_DESCRIPTION, json_schema(schema))]
         tools = [{"type": "function", "function": {

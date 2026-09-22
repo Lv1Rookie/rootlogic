@@ -36,7 +36,7 @@ class Budget:
     max_rounds: int = 2        # reflection rounds after the initial plan
     max_tasks: int = 10        # hard cap on sub-tasks per session
     max_parallel: int = 4      # concurrent research sub-agents
-    max_searches: int = 5      # web searches per sub-agent
+    max_searches: int = 8      # web searches per sub-agent
     verify_claims: int = 12    # claims checked against their cited pages (0 = no verification)
 
 

@@ -499,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--rounds", type=int, default=2, help="max reflection rounds")
     r.add_argument("--max-tasks", type=int, default=10)
     r.add_argument("--parallel", type=int, default=4)
-    r.add_argument("--searches", type=int, default=5, help="web searches per sub-agent")
+    r.add_argument("--searches", type=int, default=8, help="web searches per sub-agent")
     add_backend_args(r)
     r.add_argument("--engine", choices=["loop", "graph"], default="loop",
                    help="loop: hand-rolled orchestrator · graph: LangGraph (resumable)")

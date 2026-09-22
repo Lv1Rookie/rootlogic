@@ -26,6 +26,7 @@ from .tools import MAX_FETCHES, NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebTo
 T = TypeVar("T", bound=BaseModel)
 
 MODEL = "claude-opus-5"
+DIRECT_BELOW = 5   # below this many searches, skip dynamic filtering (see _research_server_tools)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 # USD per million tokens (Anthropic first-party list price). Cache write = 1.25x input,
@@ -84,7 +85,7 @@ class LLM(Protocol):
                    effort: str = "high") -> T: ...
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]: ...
+                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]: ...
 
 
 def json_schema(model: type[BaseModel]) -> dict:
@@ -175,7 +176,7 @@ class AnthropicLLM:
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
         submit_tool = {"name": "submit_findings", "description": SUBMIT_DESCRIPTION,
                        "strict": True, "input_schema": json_schema(schema)}
         if self.search is None:
@@ -200,7 +201,10 @@ class AnthropicLLM:
             {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
             {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_FETCHES},
         ]
-        if self.zdr:
+        # Dynamic filtering runs searches from inside code execution, which can fire a batch
+        # at once and exhaust a small budget before any result comes back. Under DIRECT_BELOW
+        # searches, call the tools directly so each search costs exactly one use.
+        if self.zdr or max_searches < DIRECT_BELOW:
             for t in web_tools:
                 t["allowed_callers"] = ["direct"]
         tools = [*web_tools, submit_tool]
