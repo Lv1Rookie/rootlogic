@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from .llm import Usage, UsageSink
 from .models import (Analysis, ClaimDraft, Clarification, Contradiction, Credibility,
-                     FindingDraft, PlanDraft, Reflection, ReportDraft, SearchHit, SourceDraft,
-                     SubTaskDraft)
+                     FindingDraft, PlanDraft, Preference, ProfileUpdate, Reflection, ReportDraft,
+                     SearchHit, SourceDraft, SubTaskDraft)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -93,6 +93,14 @@ def default_analysis(prompt: str) -> Analysis:
     )
 
 
+def default_profile(prompt: str) -> ProfileUpdate:
+    """Every answer and note becomes an 'other' preference (the real model is choosier)."""
+    said = re.findall(r"(?:User answered|User note): (.+)", prompt)
+    return ProfileUpdate(reasoning="offline demo", remove_ids=[],
+                         add=[Preference(category="other", text=f"Prefers: {s.strip()}")
+                              for s in said])
+
+
 def default_report(prompt: str) -> ReportDraft:
     t = _topic(prompt)
     return ReportDraft(
@@ -112,7 +120,8 @@ class FakeLLM:
         self.usage_sink = usage_sink or (lambda u: None)
         self.handlers = {Clarification: default_clarify, PlanDraft: default_plan,
                          Reflection: default_reflect, Analysis: default_analysis,
-                         ReportDraft: default_report, **(handlers or {})}
+                         ReportDraft: default_report, ProfileUpdate: default_profile,
+                         **(handlers or {})}
         self.calls: list[tuple[str, str]] = []  # (purpose, prompt)
         self._n = 0
         self._lock = threading.Lock()

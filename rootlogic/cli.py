@@ -130,7 +130,7 @@ def show_plan(plan: Plan) -> None:
 
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
                   budget: Budget | None = None, home: Path = HOME, zdr: bool = False,
-                  search: str = "anthropic"):
+                  search: str = "anthropic", use_profile: bool = True):
     """Construct an engine with usage accounting wired to the store.
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
@@ -155,9 +155,10 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
     if engine == "graph":
         from .graph import ResearchGraph
         eng = ResearchGraph(llm, store, ui, checkpoint_path=home / "checkpoints.db",
-                            budget=budget, reports_dir=home / "reports")
+                            budget=budget, reports_dir=home / "reports", use_profile=use_profile)
     else:
-        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports")
+        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports",
+                           use_profile=use_profile)
     holder["e"] = eng
     return eng
 
@@ -169,7 +170,8 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
                     max_parallel=args.parallel, max_searches=args.searches)
     eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget,
                         zdr=getattr(args, "zdr", False),
-                        search=getattr(args, "search", "anthropic"))
+                        search=getattr(args, "search", "anthropic"),
+                        use_profile=not getattr(args, "no_profile", False))
     install_pause_handler(eng, ui)
     return eng
 
@@ -204,9 +206,13 @@ def print_report(report) -> int:
 
 
 def cmd_research(args: argparse.Namespace, store: Store) -> int:
+    if args.follow_up and not store.session(args.follow_up):
+        console.print(f"[red]Unknown session {args.follow_up}[/] (see rootlogic history)")
+        return 1
     engine = build_engine(args, store, args.engine)
-    topic = " ".join(args.topic) or Prompt.ask("[bold]What should I research?[/]")
-    return print_report(engine.run(topic))
+    prompt = "What should I dig into next?" if args.follow_up else "What should I research?"
+    topic = " ".join(args.topic) or Prompt.ask(f"[bold]{prompt}[/]")
+    return print_report(engine.run(topic, parent=args.follow_up))
 
 
 def cmd_resume(args: argparse.Namespace, store: Store) -> int:
@@ -242,15 +248,47 @@ def cmd_graph(args: argparse.Namespace, store: Store) -> int:
 
 def cmd_history(args, store: Store) -> int:
     table = Table(title="Research sessions")
-    for col in ("id", "when", "status", "topic", "cost"):
+    for col in ("id", "when", "status", "topic", "follows", "cost"):
         table.add_column(col)
     for s in store.sessions(args.limit):
         u = store.usage(s["id"])
         table.add_row(s["id"], s["created_at"][:16].replace("T", " "), s["status"], s["topic"],
-                      f"${u['cost_usd']:.2f}")
+                      s.get("parent_id") or "", f"${u['cost_usd']:.2f}")
     console.print(table)
     if sugg := store.suggestions():
         console.print("[bold]Suggested next topics:[/] " + " · ".join(sugg))
+    return 0
+
+
+def cmd_profile(args, store: Store) -> int:
+    """View and edit the standing preferences the assistant has learned."""
+    if args.action == "add":
+        text = " ".join(args.args).strip()
+        if not text:
+            console.print("[red]Usage:[/] rootlogic profile add <preference text>")
+            return 1
+        added = store.add_preference(args.category, text)
+        console.print("Added." if added else "Already in your profile.")
+    elif args.action == "rm":
+        ids = [a for a in args.args if a.isdigit()]
+        if not ids:
+            console.print("[red]Usage:[/] rootlogic profile rm <id> [<id> ...]")
+            return 1
+        for i in ids:
+            console.print(f"{i}: " + ("removed" if store.remove_preference(int(i)) else "not found"))
+    elif args.action == "clear":
+        console.print(f"Removed {store.clear_preferences()} preference(s).")
+    prefs = store.preferences()
+    if not prefs:
+        console.print("[dim]Profile is empty. It fills in as you answer questions and leave "
+                      "notes, or add entries with: rootlogic profile add <text>[/]")
+        return 0
+    table = Table(title="Your research profile (standing preferences)")
+    for col in ("id", "category", "preference", "learned from"):
+        table.add_column(col)
+    for p in prefs:
+        table.add_row(str(p["id"]), p["category"], p["text"], p["session_id"] or "added by you")
+    console.print(table)
     return 0
 
 
@@ -309,6 +347,10 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("research", help="research a topic")
     r.add_argument("topic", nargs="*")
     r.add_argument("-y", "--yes", action="store_true", help="auto-approve the plan")
+    r.add_argument("--follow-up", metavar="SESSION",
+                   help="continue an earlier session: reuse its findings, research only what's new")
+    r.add_argument("--no-profile", action="store_true",
+                   help="don't use or update your standing preferences for this run")
     r.add_argument("-v", "--verbose", action="store_true", help="show dropped sources")
     r.add_argument("--offline", action="store_true", help="use the fake LLM (no API calls)")
     r.add_argument("--rounds", type=int, default=2, help="max reflection rounds")
@@ -340,6 +382,14 @@ def main(argv: list[str] | None = None) -> int:
 
     gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")
     gr.set_defaults(fn=cmd_graph)
+
+    pr = sub.add_parser("profile", help="view or edit your standing preferences")
+    pr.add_argument("action", nargs="?", choices=["list", "add", "rm", "clear"], default="list")
+    pr.add_argument("args", nargs="*")
+    pr.add_argument("--category", default="other",
+                    choices=["audience", "region", "time_window", "sources_prefer",
+                             "sources_avoid", "format", "expertise", "other"])
+    pr.set_defaults(fn=cmd_profile)
 
     h = sub.add_parser("history", help="list past sessions and suggested topics")
     h.add_argument("--limit", type=int, default=20)

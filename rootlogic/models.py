@@ -109,6 +109,23 @@ class ReportDraft(Strict):
     related_topics: list[str] = Field(description="3-5 follow-up research topics for this user.")
 
 
+PreferenceCategory = Literal["audience", "region", "time_window", "sources_prefer",
+                             "sources_avoid", "format", "expertise", "other"]
+
+
+class Preference(Strict):
+    category: PreferenceCategory
+    text: str = Field(description="One short, general, reusable preference, e.g. "
+                                  "'Writes for policy analysts in the EU'.")
+
+
+class ProfileUpdate(Strict):
+    reasoning: str
+    add: list[Preference] = Field(description="New standing preferences. Empty if none.")
+    remove_ids: list[int] = Field(description="Ids of existing preferences this session "
+                                              "contradicts or supersedes. Empty if none.")
+
+
 # --------------------------------------------------------------------------- runtime
 
 TaskStatus = Literal["pending", "running", "done", "skipped", "failed"]
@@ -121,7 +138,7 @@ class SubTask(BaseModel):
     search_queries: list[str]
     depends_on: list[str] = []
     status: TaskStatus = "pending"
-    origin: Literal["planner", "reflection", "user"] = "planner"
+    origin: Literal["planner", "reflection", "user", "previous"] = "planner"
 
 
 class Plan(BaseModel):

@@ -43,8 +43,9 @@ STATIC = Path(__file__).parent / "static"
 class Run:
     """One engine execution plus its replayable event stream and pending human request."""
 
-    def __init__(self, topic: str, engine: str, offline: bool):
+    def __init__(self, topic: str, engine: str, offline: bool, parent: str | None = None):
         self.id = uuid.uuid4().hex[:12]
+        self.parent = parent
         self.topic = topic
         self.engine_name = engine
         self.offline = offline
@@ -100,6 +101,7 @@ class Run:
     def summary(self) -> dict:
         return {"run_id": self.id, "session_id": self.sid, "topic": self.topic,
                 "engine": self.engine_name, "offline": self.offline, "status": self.status,
+                "parent_session": self.parent,
                 "pending": self.pending, "events": len(self.events)}
 
 
@@ -153,6 +155,14 @@ class StartRun(BaseModel):
     offline: bool = False
     max_rounds: int = Field(2, ge=0, le=5)
     max_tasks: int = Field(10, ge=1, le=20)
+    parent_session: str | None = None   # follow up on this earlier session
+    use_profile: bool = True
+
+
+class NewPreference(BaseModel):
+    text: str = Field(min_length=2, max_length=300)
+    category: Literal["audience", "region", "time_window", "sources_prefer", "sources_avoid",
+                      "format", "expertise", "other"] = "other"
 
 
 class Answer(BaseModel):
@@ -184,19 +194,20 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
             raise HTTPException(404, "Unknown run")
         return runs[run_id]
 
-    def launch(run: Run, target: str, arg: str, budget: Budget) -> None:
+    def launch(run: Run, target: str, arg: str, budget: Budget, *, use_profile: bool = True,
+               **call_kw) -> None:
         from .search import SearchError
         try:
             run.engine = engine_factory(store, WebInteraction(run), engine=run.engine_name,
                                         offline=run.offline, budget=budget, home=home, zdr=zdr,
-                                        search=search)
+                                        search=search, use_profile=use_profile)
         except SearchError as e:
             runs.pop(run.id, None)
             raise HTTPException(400, f"Search provider error: {e}") from e
 
         def work():
             try:
-                report = getattr(run.engine, target)(arg)
+                report = getattr(run.engine, target)(arg, **call_kw)
                 if report is not None:
                     run.push({"type": "report", "markdown": report.to_markdown(),
                               "session_id": run.sid})
@@ -222,9 +233,12 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
     # ------------------------------------------------------------- runs (live)
     @app.post("/api/runs")
     def start_run(body: StartRun) -> dict:
-        run = Run(body.topic.strip(), body.engine, body.offline)
+        if body.parent_session and not store.session(body.parent_session):
+            raise HTTPException(404, "Unknown parent session")
+        run = Run(body.topic.strip(), body.engine, body.offline, parent=body.parent_session)
         runs[run.id] = run
-        launch(run, "run", run.topic, Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks))
+        launch(run, "run", run.topic, Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks),
+               use_profile=body.use_profile, parent=body.parent_session)
         return run.summary()
 
     @app.get("/api/runs")
@@ -288,7 +302,8 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
         for s in store.sessions(50):
             u = store.usage(s["id"])
             rows.append({"id": s["id"], "topic": s["topic"], "status": s["status"],
-                         "created_at": s["created_at"], "cost_usd": u["cost_usd"]})
+                         "created_at": s["created_at"], "cost_usd": u["cost_usd"],
+                         "parent_id": s.get("parent_id")})
         return {"sessions": rows, "suggestions": store.suggestions()}
 
     @app.get("/api/sessions/{sid}")
@@ -314,6 +329,26 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
         runs[run.id] = run
         launch(run, "resume", sid, Budget())
         return run.summary()
+
+    # ------------------------------------------------------------- profile
+    @app.get("/api/profile")
+    def profile() -> dict:
+        return {"preferences": store.preferences()}
+
+    @app.post("/api/profile")
+    def add_preference(body: NewPreference) -> dict:
+        return {"added": store.add_preference(body.category, body.text),
+                "preferences": store.preferences()}
+
+    @app.delete("/api/profile/{pref_id}")
+    def remove_preference(pref_id: int) -> dict:
+        if not store.remove_preference(pref_id):
+            raise HTTPException(404, "Unknown preference")
+        return {"preferences": store.preferences()}
+
+    @app.delete("/api/profile")
+    def clear_profile() -> dict:
+        return {"removed": store.clear_preferences(), "preferences": []}
 
     @app.delete("/api/sessions/{sid}")
     def forget(sid: str) -> dict:

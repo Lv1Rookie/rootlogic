@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS llm_calls ( -- token + cost accounting, one row per A
     stop_reason TEXT,
     request_id TEXT
 );
+CREATE TABLE IF NOT EXISTS preferences ( -- the user's standing preferences (long-term profile)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    text TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    session_id TEXT,                   -- session it was learned from; NULL if added by hand
+    created_at TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
     session_id UNINDEXED, topic, summary, takeaways
 );
@@ -104,6 +111,14 @@ class Store:
             self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive migrations for databases created by older versions."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")}
+        if "parent_id" not in cols:  # follow-up sessions link to the session they continue
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN parent_id TEXT")
+        self._conn.commit()
 
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -116,10 +131,10 @@ class Store:
             return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
 
     # ------------------------------------------------------------------ sessions
-    def create_session(self, topic: str) -> str:
+    def create_session(self, topic: str, parent_id: str | None = None) -> str:
         sid = uuid.uuid4().hex[:8]
-        self._exec("INSERT INTO sessions (id, topic, status, created_at) VALUES (?,?,?,?)",
-                   (sid, topic, "running", now()))
+        self._exec("INSERT INTO sessions (id, topic, status, created_at, parent_id) "
+                   "VALUES (?,?,?,?,?)", (sid, topic, "running", now(), parent_id))
         return sid
 
     def update_session(self, sid: str, **fields: Any) -> None:
@@ -163,6 +178,9 @@ class Store:
         return self._all("SELECT * FROM events WHERE session_id = ? ORDER BY id", (sid,))
 
     # ------------------------------------------------------------------ tasks + sources
+    def tasks(self, sid: str) -> list[dict[str, Any]]:
+        return self._all("SELECT * FROM tasks WHERE session_id = ? ORDER BY rowid", (sid,))
+
     def upsert_task(self, sid: str, task_id: str, question: str, status: str, origin: str,
                     finding_json: str | None = None) -> None:
         self._exec(
@@ -218,6 +236,22 @@ class Store:
                       SUM(output_tokens) AS output_tokens, SUM(web_searches) AS web_searches,
                       SUM(cost_usd) AS cost_usd
                FROM llm_calls WHERE session_id = ? GROUP BY purpose ORDER BY MIN(id)""", (sid,))
+
+    # ------------------------------------------------------------------ user profile
+    def preferences(self) -> list[dict[str, Any]]:
+        return self._all("SELECT * FROM preferences ORDER BY category, id")
+
+    def add_preference(self, category: str, text: str, session_id: str | None = None) -> bool:
+        """Returns False if an identical preference (case-insensitive) already exists."""
+        cur = self._exec("INSERT OR IGNORE INTO preferences (category, text, session_id, "
+                         "created_at) VALUES (?,?,?,?)", (category, text.strip(), session_id, now()))
+        return cur.rowcount > 0
+
+    def remove_preference(self, pref_id: int) -> bool:
+        return self._exec("DELETE FROM preferences WHERE id = ?", (pref_id,)).rowcount > 0
+
+    def clear_preferences(self) -> int:
+        return self._exec("DELETE FROM preferences").rowcount
 
     # ------------------------------------------------------------------ long-term memory
     def remember(self, sid: str, topic: str, summary: str, takeaways: list[str]) -> None:

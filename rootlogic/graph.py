@@ -39,6 +39,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 
 from . import context as ctx
+from . import continuity
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction
@@ -72,12 +73,16 @@ class ResearchState(TypedDict, total=False):
     done_researching: bool
     status: str                                      # running | done | aborted
     report: dict
+    parent: str                                      # session this one follows up, if any
+    previous_block: str                              # earlier findings shown to clarify/plan
+    previous_tasks: list[dict]                       # earlier tasks, prepended to the plan
 
 
 class ResearchGraph:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, checkpoint_path: str | Path,
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
-                 today: date | None = None, blocked_domains: tuple[str, ...] = ()):
+                 today: date | None = None, blocked_domains: tuple[str, ...] = (),
+                 use_profile: bool = True):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -85,6 +90,7 @@ class ResearchGraph:
         self.reports_dir = Path(reports_dir)
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
+        self.use_profile = use_profile
         self.control = Control()
         self.sid = ""
         if str(checkpoint_path) != ":memory:":
@@ -155,18 +161,42 @@ class ResearchGraph:
 
     # ================================================================== nodes
     def recall(self, s: ResearchState) -> dict:
-        prior = self.store.recall(s["topic"], exclude=self.sid)
+        """Load what this session starts from: profile, earlier thread (follow-up), memory."""
+        update: dict[str, Any] = {"rounds": 0, "findings": {}, "seen_urls": [],
+                                  "status": "running", "context": [], "previous_block": "",
+                                  "previous_tasks": []}
+        if self.use_profile and (prefs := self.store.preferences()):
+            update["context"] += continuity.profile_context(prefs)
+            self._emit("profile.loaded", f"Using {len(prefs)} standing preference(s): "
+                       + "; ".join(p["text"] for p in prefs), count=len(prefs))
+        if parent := s.get("parent"):
+            prev = continuity.load_previous(self.store, parent)
+            continuity.adopt_previous(self.store, self.sid, prev)
+            update["findings"] = {k: f.model_dump() for k, f in prev.findings.items()}
+            update["seen_urls"] = sorted(prev.seen_urls)
+            update["context"] += prev.context + [prev.note()]
+            update["previous_block"] = prev.block()
+            update["previous_tasks"] = [t.model_dump() for t in prev.tasks]
+            self._emit("followup.loaded",
+                       f"Continuing “{prev.topic}” ({prev.session_id}): "
+                       f"{len(prev.findings)} earlier finding(s), "
+                       f"{len(prev.seen_urls)} source(s) carried over",
+                       parent=prev.session_id, findings=len(prev.findings))
+        prior = [p for p in self.store.recall(s["topic"], exclude=self.sid)
+                 if p["session_id"] != parent]
         if prior:
             self._emit("memory.recalled", f"Found {len(prior)} related past session(s): "
                        + "; ".join(p["topic"] for p in prior),
                        sessions=[p["session_id"] for p in prior])
-        return {"memory": prior, "rounds": 0, "findings": {}, "seen_urls": [], "status": "running"}
+        update["memory"] = prior
+        return update
 
     def clarify(self, s: ResearchState) -> dict:
         self._emit("clarify.started", "Checking whether the topic needs clarification")
         c = self.llm.structured(purpose="clarify", system=prompts.CLARIFIER, schema=Clarification,
                                 prompt=ctx.topic_block(s["topic"], self.today, s.get("memory", []),
-                                                       s.get("context", [])), effort="low")
+                                                       s.get("context", []),
+                                                       s.get("previous_block", "")), effort="low")
         if not c.needs_clarification or not c.questions:
             self._emit("clarify.skipped", f"Topic is clear enough: {c.reasoning}")
             return {"pending_questions": []}
@@ -194,13 +224,18 @@ class ResearchGraph:
         draft = self.llm.structured(purpose="plan", system=prompts.PLANNER, schema=PlanDraft,
                                     prompt=ctx.topic_block(s["topic"], self.today,
                                                            s.get("memory", []),
-                                                           s.get("context", [])))
+                                                           s.get("context", []),
+                                                           s.get("previous_block", "")))
         plan = Plan.from_draft(s["topic"], draft)
         plan.subtasks = plan.subtasks[: self.budget.max_tasks]
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
+        plan.subtasks = [SubTask.model_validate(t) for t in s.get("previous_tasks", [])] \
+            + plan.subtasks
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
-        self._emit("plan.created", f"Plan: {len(plan.subtasks)} sub-tasks, {recency}",
+        new, earlier = continuity.new_task_count(plan), len(plan.subtasks)
+        carried = f" (+{earlier - new} from earlier research)" if earlier > new else ""
+        self._emit("plan.created", f"Plan: {new} new sub-tasks{carried}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
         return {"plan": plan.model_dump()}
 
@@ -309,7 +344,7 @@ class ResearchGraph:
                                                           s.get("context", [])))
         self._emit("reflect.done", ("Sufficient. " if r.sufficient else "Gaps found. ") + r.reasoning,
                    new_tasks=len(r.new_subtasks), questions=len(r.questions_for_user))
-        room = self.budget.max_tasks - len(plan.subtasks)
+        room = self.budget.max_tasks - continuity.new_task_count(plan)
         if r.new_subtasks and room <= 0:
             self._emit("loop.budget", f"Task cap ({self.budget.max_tasks}) reached; not adding more")
         added = self._add_tasks(plan, r.new_subtasks[: max(0, room)], origin="reflection")
@@ -347,6 +382,7 @@ class ResearchGraph:
         self.store.update_session(self.sid, status="done", summary=draft.executive_summary,
                                   related_topics=draft.related_topics, report_path=str(path))
         self.store.remember(self.sid, plan.topic, draft.executive_summary, draft.key_takeaways)
+        self._learn_profile(plan.topic)
         usage = self.store.usage(self.sid)
         self._emit("session.done", f"Report saved to {path} · {usage['calls']} LLM calls · "
                                    f"{usage['input_tokens'] + usage['output_tokens']:,} tokens · "
@@ -354,6 +390,20 @@ class ResearchGraph:
         return {"status": "done", "report": {**s["report"], "full": report.model_dump()}}
 
     # ================================================================== helpers
+    def _learn_profile(self, topic: str) -> None:
+        if not self.use_profile:
+            return
+        try:
+            added, removed = continuity.learn_profile(self.llm, self.store, self.sid, topic)
+        except (LLMError, AgentRefusal) as e:
+            self._emit("profile.skipped", f"Profile not updated: {e}")
+            return
+        if added or removed:
+            self._emit("profile.updated", "Profile updated"
+                       + (f" · learned: {'; '.join(added)}" if added else "")
+                       + (f" · dropped: {'; '.join(removed)}" if removed else ""),
+                       added=added, removed=removed)
+
     def _findings(self, s: ResearchState) -> list[Finding]:
         return [Finding.model_validate(f) for f in s.get("findings", {}).values()]
 
@@ -410,11 +460,16 @@ class ResearchGraph:
         return {"configurable": {"thread_id": self.sid},
                 "max_concurrency": self.budget.max_parallel}
 
-    def run(self, topic: str) -> Report | None:
-        self.sid = self.store.create_session(topic)
+    def run(self, topic: str, parent: str | None = None) -> Report | None:
+        if parent and not self.store.session(parent):
+            raise ValueError(f"Unknown session {parent}")
+        self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}” (LangGraph engine)")
-        return self._drive({"session_id": self.sid, "topic": topic})
+        state: dict[str, Any] = {"session_id": self.sid, "topic": topic}
+        if parent:
+            state["parent"] = parent
+        return self._drive(state)
 
     def resume(self, session_id: str) -> Report | None:
         """Continue a session from its last checkpoint (after a crash, error, or quit)."""

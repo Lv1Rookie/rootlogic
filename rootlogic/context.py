@@ -16,8 +16,11 @@ def context_block(context: list[str]) -> str:
     return ("User clarifications and guidance:\n" + "\n".join(context) + "\n") if context else ""
 
 
-def topic_block(topic: str, today: date, memory: list[dict], context: list[str]) -> str:
+def topic_block(topic: str, today: date, memory: list[dict], context: list[str],
+                previous: str = "") -> str:
     parts = [f"Topic: {topic}", f"Today's date: {today.isoformat()}"]
+    if previous:
+        parts.append(previous)
     if memory:
         parts.append("Prior research by this user:\n" + "\n".join(
             f"- {m['topic']} ({m['created_at'][:10]}): {m['summary']}" for m in memory))

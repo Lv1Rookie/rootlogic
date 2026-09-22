@@ -164,3 +164,37 @@ def test_orphaned_sessions_marked_interrupted_on_startup(tmp_path):
     sid = store.create_session("left running by a dead server")
     create_app(store, tmp_path, engine_factory=lambda *a, **k: None)
     assert store.session(sid)["status"] == "interrupted"
+
+
+def test_profile_api_and_follow_up_run(client):
+    assert client.get("/api/profile").json()["preferences"] == []
+    added = client.post("/api/profile", json={"text": "Focuses on the EU", "category": "region"})
+    pref = added.json()["preferences"][0]
+    assert added.json()["added"] and pref["category"] == "region"
+    assert not client.post("/api/profile", json={"text": "focuses on the eu"}).json()["added"]
+
+    # a run uses the profile, then a follow-up continues it
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    parent = wait(client, rid, finished)["session_id"]
+    types = [e["type"] for e in sse_events(client, rid)]
+    assert "profile.loaded" in types
+
+    assert client.post("/api/runs", json={"topic": "x y", "parent_session": "nope"}).status_code \
+        == 404
+    rid2 = client.post("/api/runs", json={"topic": "How are unions responding?",
+                                          "parent_session": parent}).json()["run_id"]
+    s = wait(client, rid2, pending("plan"))
+    origins = [t["origin"] for t in s["pending"]["plan"]["subtasks"]]
+    assert origins.count("previous") == 3 and origins.count("planner") == 3
+    client.post(f"/api/runs/{rid2}/answer", json={"request_id": s["pending"]["request_id"],
+                                                  "answer": {"approved": True}})
+    child = wait(client, rid2, finished)
+    assert child["status"] == "done" and child["parent_session"] == parent
+    rows = {r["id"]: r for r in client.get("/api/sessions").json()["sessions"]}
+    assert rows[child["session_id"]]["parent_id"] == parent
+
+    assert client.delete(f"/api/profile/{pref['id']}").json()["preferences"] == []
+    assert client.delete(f"/api/profile/{pref['id']}").status_code == 404

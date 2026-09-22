@@ -186,7 +186,7 @@ check that:
 - The LangGraph engine resumes after a crash.
 - The web API round-trips questions, plan edits and overrides, and replays SSE.
 
-All 65 tests run in under a second with no internet.
+All 79 tests run in under a second with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -237,7 +237,27 @@ Testing it in a real browser caught two bugs the unit tests missed:
 - Sessions orphaned by a server restart stayed "running" forever. They're now marked
   `interrupted` on startup, and graph-engine ones can be resumed.
 
-## Step 15: Check it, then publish
+## Step 15: Memory that makes research better → [`continuity.py`](../rootlogic/continuity.py)
+
+Two features let rootlogic use the user's own input across sessions:
+
+- **A learned profile.** At the end of a session in which the user answered questions or
+  left notes, one small structured call (`ProfileUpdate`) pulls out *lasting* preferences into a
+  `preferences` table: audience, region, preferred or avoided sources. It also removes any the
+  user contradicted. The next session puts them into every prompt, and the clarifier doesn't
+  re-ask what they already cover. The user can view and delete entries, which matters for trust.
+- **Follow-up threads.** `load_previous` rebuilds a finished session's findings, sources and
+  user answers. A new session is linked to it by `parent_id` and starts with those findings as
+  already-done `previous` tasks. The planner sees which questions are already answered and plans
+  only new ones, and already-seen URLs count as duplicates.
+
+Design choices worth explaining:
+- Learning is **best-effort**: if the profile call fails, the finished research still succeeds.
+- The call is **skipped entirely** when the user said nothing, so it costs nothing on
+  auto-approved runs.
+- Remembered text is treated as **data, not instructions**, like web content.
+
+## Step 16: Check it, then publish
 
 The build was checked in this order:
 

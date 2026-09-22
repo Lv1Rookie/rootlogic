@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 
 from . import context as ctx
+from . import continuity
 from . import prompts
 from .control import Command, Control, Event, Interaction
 from .llm import LLM, AgentRefusal, LLMError
@@ -37,7 +38,7 @@ class Budget:
 class Orchestrator:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, budget: Budget | None = None,
                  reports_dir: Path | str = "reports", today: date | None = None,
-                 blocked_domains: tuple[str, ...] = ()):
+                 blocked_domains: tuple[str, ...] = (), use_profile: bool = True):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -45,20 +46,26 @@ class Orchestrator:
         self.reports_dir = Path(reports_dir)
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
+        self.use_profile = use_profile          # read + learn the user's standing preferences
         self.control = Control()
         # per-session state
         self.sid = ""
         self.context: list[str] = []      # clarifications + user notes, fed to every prompt
         self.findings: dict[str, Finding] = {}
         self.seen_urls: set[str] = set()
+        self.previous: continuity.Previous | None = None   # set when following up a session
         self._stop = False
 
     # ================================================================== public API
-    def run(self, topic: str) -> Report | None:
-        self.sid = self.store.create_session(topic)
+    def run(self, topic: str, parent: str | None = None) -> Report | None:
+        """Research ``topic``. With ``parent``, continue that earlier session (a follow-up)."""
+        previous = continuity.load_previous(self.store, parent) if parent else None
+        self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}”")
         try:
+            self._load_profile()
+            self._continue_from(previous)
             memory = self._recall(topic)
             self._clarify(topic, memory)
             plan = self._plan(topic, memory)
@@ -82,8 +89,33 @@ class Orchestrator:
         return report
 
     # ================================================================== stages
+    def _load_profile(self) -> None:
+        if not self.use_profile:
+            return
+        prefs = self.store.preferences()
+        if prefs:
+            self.context.extend(continuity.profile_context(prefs))
+            self._emit("profile.loaded", f"Using {len(prefs)} standing preference(s): "
+                       + "; ".join(p["text"] for p in prefs), count=len(prefs))
+
+    def _continue_from(self, previous: continuity.Previous | None) -> None:
+        if previous is None:
+            return
+        self.previous = previous
+        continuity.adopt_previous(self.store, self.sid, previous)
+        self.findings.update(previous.findings)
+        self.seen_urls |= previous.seen_urls
+        self.context.extend(previous.context)
+        self.context.append(previous.note())
+        self._emit("followup.loaded",
+                   f"Continuing “{previous.topic}” ({previous.session_id}): "
+                   f"{len(previous.findings)} earlier finding(s), "
+                   f"{len(previous.seen_urls)} source(s) carried over",
+                   parent=previous.session_id, findings=len(previous.findings))
+
     def _recall(self, topic: str) -> list[dict]:
-        prior = self.store.recall(topic, exclude=self.sid)
+        prior = [p for p in self.store.recall(topic, exclude=self.sid)
+                 if not self.previous or p["session_id"] != self.previous.session_id]
         if prior:
             self._emit("memory.recalled",
                        f"Found {len(prior)} related past session(s): "
@@ -111,8 +143,11 @@ class Orchestrator:
         plan.subtasks = plan.subtasks[: self.budget.max_tasks]
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
+        continuity.merge_previous(plan, self.previous)
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
-        self._emit("plan.created", f"Plan: {len(plan.subtasks)} sub-tasks, {recency}",
+        new, earlier = continuity.new_task_count(plan), len(plan.subtasks)
+        carried = f" (+{earlier - new} from earlier research)" if earlier > new else ""
+        self._emit("plan.created", f"Plan: {new} new sub-tasks{carried}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
         return plan
 
@@ -195,7 +230,7 @@ class Orchestrator:
         if r.questions_for_user:
             self._ask_user(r.questions_for_user[:2])
 
-        room = self.budget.max_tasks - len(plan.subtasks)
+        room = self.budget.max_tasks - continuity.new_task_count(plan)
         added = self._add_tasks(plan, r.new_subtasks[: max(0, room)], origin="reflection")
         if r.new_subtasks and room <= 0:
             self._emit("loop.budget", f"Task cap ({self.budget.max_tasks}) reached; not adding more")
@@ -228,12 +263,29 @@ class Orchestrator:
         self.store.update_session(self.sid, status="done", summary=draft.executive_summary,
                                   related_topics=draft.related_topics, report_path=str(path))
         self.store.remember(self.sid, plan.topic, draft.executive_summary, draft.key_takeaways)
+        self._learn_profile(plan.topic)
         usage = self.store.usage(self.sid)
         self._emit("session.done",
                    f"Report saved to {path} · {usage['calls']} LLM calls · "
                    f"{usage['input_tokens'] + usage['output_tokens']:,} tokens · "
                    f"${usage['cost_usd']:.2f}", path=str(path))
         return report
+
+    def _learn_profile(self, topic: str) -> None:
+        """Best effort: a failed profile update never fails the finished research."""
+        if not self.use_profile:
+            return
+        try:
+            added, removed = continuity.learn_profile(self.llm, self.store, self.sid, topic)
+        except (LLMError, AgentRefusal) as e:
+            self._emit("profile.skipped", f"Profile not updated: {e}")
+            return
+        if added or removed:
+            self._emit("profile.updated",
+                       "Profile updated"
+                       + (f" · learned: {'; '.join(added)}" if added else "")
+                       + (f" · dropped: {'; '.join(removed)}" if removed else ""),
+                       added=added, removed=removed)
 
     # ================================================================== human in the loop
     def _ask_user(self, questions: list[str]) -> None:
@@ -295,7 +347,8 @@ class Orchestrator:
 
     # ================================================================== prompt blocks
     def _topic_block(self, topic: str, memory: list[dict]) -> str:
-        return ctx.topic_block(topic, self.today, memory, self.context)
+        return ctx.topic_block(topic, self.today, memory, self.context,
+                               previous=self.previous.block() if self.previous else "")
 
     def _progress_block(self, plan: Plan) -> str:
         return ctx.progress_block(plan, list(self.findings.values()), self.context)

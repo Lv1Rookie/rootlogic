@@ -38,12 +38,14 @@ rootlogic web                                    # web UI at http://127.0.0.1:80
 rootlogic research --engine graph "topic"       # LangGraph engine (resumable)
 rootlogic resume <session>   # continue a graph session after a crash / quit
 rootlogic graph              # print the LangGraph engine as a Mermaid diagram
+rootlogic research --follow-up <session> "dig deeper into X"   # continue earlier research
+rootlogic profile [add|rm|clear]   # standing preferences the assistant learned about you
 rootlogic history            # past sessions + suggested next topics (long-term memory)
 rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 65 tests, no network
+pytest                       # 79 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -54,6 +56,7 @@ use more context tokens.
 `--search tavily` (also on `resume` and `web`): sub-agents search through our own `SearchProvider`
 tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in web tools. Needs
 `TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
+`--no-profile` skips reading and learning your standing preferences for one run.
 Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
 
 ## How it maps to the assignment
@@ -65,7 +68,7 @@ Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
 | Proactive search for recent info, filter outdated/irrelevant | `web_search`/`web_fetch` server tools; `filters.filter_sources` (recency, relevance, dedupe, blocklist) with logged reasons |
 | Ask clarifying questions, adapt strategy in real time | `_clarify` (before planning) and `_reflect` (mid-run: new sub-tasks or questions to user) |
 | Summaries + key takeaways per source (bonus) | `SourceDraft.summary/key_takeaways`, report source list |
-| Long-term memory + related topic suggestions (bonus) | `Store.remember/recall` (SQLite FTS5), `Store.suggestions`, prior sessions fed to planner |
+| Long-term memory + related topic suggestions (bonus) | `Store.remember/recall` (SQLite FTS5), `Store.suggestions`, prior sessions fed to planner; a learned **user profile** (`continuity.learn_profile`) and **follow-up threads** that reuse earlier findings (`--follow-up`) |
 | Transparent action log, monitor/override (bonus) | `events` table + live stream; plan approve/edit; Ctrl-C override (skip/add/note/stop/abort) |
 | Clear, testable orchestration | plain-Python state machine behind an `LLM` protocol; `FakeLLM` + `ScriptedUI` tests |
 
@@ -110,6 +113,7 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `web.py` + `static/index.html` | FastAPI + SSE web UI implementing `Interaction`; runs engines in background threads. |
 | `graph.py` | The same agent as a LangGraph state machine (checkpoints, `interrupt()`, resume). |
 | `context.py` | Pure prompt builders and source curation shared by both engines. |
+| `continuity.py` | Cross-session continuity: learns your standing preferences, and rebuilds an earlier session so a follow-up can continue it. |
 | `search.py` | `SearchProvider` protocol (`search`, `fetch`) + `TavilySearch`, `StaticSearch`. The model-agnostic path for web access. |
 | `fake_llm.py` | Deterministic LLM for tests and `--offline` demos. |
 
@@ -157,6 +161,25 @@ New to agents? Start with [docs/walkthrough.md](docs/walkthrough.md), a step-by-
 of how this project was built. See [docs/research/agentic-research-assistant.md](docs/research/agentic-research-assistant.md)
 for the research behind these choices (frameworks, storage options, protocols, UX, tools) and an
 alternative architecture (LangGraph + web UI).
+
+## Memory that improves research
+
+rootlogic uses what you tell it, not just what it searches:
+
+- **Within a session**, your answers to clarifying questions and any notes you add mid-run go into
+  every later prompt: planner, every sub-agent, critic, analyst and writer.
+- **Your profile.** After a session where you answered questions or left notes, one small
+  low-effort call pulls out *lasting* preferences (audience, region, preferred or avoided sources,
+  time window, format). It drops any the session contradicted. Every later session starts with them,
+  and the clarifier doesn't re-ask what they already cover. View or edit them with `rootlogic profile`
+  or in the web sidebar. Opt out per run with `--no-profile`.
+- **Follow-ups.** `--follow-up <session>` (or "Continue this research" in the web UI) starts a
+  linked session seeded with the earlier findings, sources and your earlier answers. Earlier
+  findings appear as `previous` tasks that are already done. The planner is told to research only
+  what's new, and already-seen sources are deduplicated. Follow-ups chain, and earlier tasks don't
+  count against the task budget.
+- **Past sessions.** Keyword search over earlier topics and summaries feeds the planner, and
+  suggests next topics.
 
 ## Web UI
 

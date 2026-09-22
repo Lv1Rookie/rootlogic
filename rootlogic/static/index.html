@@ -97,6 +97,12 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
 .tab.active { color: var(--ink); border-color: var(--accent); }
 .empty { color: var(--muted); text-align: center; padding: 48px 16px; }
 .hidden { display: none !important; }
+.pref { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; padding: 4px 0; }
+.pref .cat { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.pref .x { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.pref .x:hover { color: var(--bad); }
+.tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.continue { border-left: 4px solid var(--accent); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; }
@@ -134,6 +140,16 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
     </div>
 
     <div>
+      <h2>Your profile</h2>
+      <div id="profile" class="stack" style="gap:0"></div>
+      <form id="pref-add" class="row" style="margin-top:6px">
+        <input type="text" id="pref-text" style="flex:1" placeholder="e.g. Writes for policy analysts">
+        <button class="btn small" type="submit">Add</button>
+      </form>
+      <label class="inline" style="margin-top:6px"><input type="checkbox" id="use-profile" checked> Use my profile</label>
+    </div>
+
+    <div>
       <h2>History</h2>
       <div id="history" class="list"><div class="meta">No sessions yet.</div></div>
     </div>
@@ -160,6 +176,13 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
       </div>
 
       <div id="cards" class="stack"></div>
+
+      <form id="continue" class="panel continue stack hidden">
+        <h2 style="margin:0">Continue this research</h2>
+        <p class="meta" style="margin:0">Ask a follow-up. Earlier findings are reused, so only what's new gets researched.</p>
+        <div class="row"><input type="text" id="continue-text" style="flex:1" placeholder="e.g. How are unions responding?">
+          <button class="btn primary" type="submit">Continue</button></div>
+      </form>
 
       <div class="panel" id="plan-panel">
         <h2>Plan</h2>
@@ -207,7 +230,7 @@ async function loadHistory() {
     el.type = "button";
     el.className = "item" + (s.id === state.sid ? " active" : "");
     el.innerHTML = `<span class="t">${esc(s.topic)}</span><span class="pill ${esc(s.status)}">${esc(s.status)}</span>
-      <span class="m">${esc(s.created_at.slice(0,16).replace("T"," "))} · $${s.cost_usd.toFixed(2)} · ${esc(s.id)}</span>`;
+      <span class="m">${s.parent_id ? "↳ follows " + esc(s.parent_id) + " · " : ""}${esc(s.created_at.slice(0,16).replace("T"," "))} · $${s.cost_usd.toFixed(2)} · ${esc(s.id)}</span>`;
     el.onclick = () => openSession(s.id);
     h.appendChild(el);
   }
@@ -235,7 +258,7 @@ function resetView(topic) {
   $("#tab-usage").innerHTML = `<div class="empty">Usage appears when the session ends.</div>`;
   $("#plan-rows").innerHTML = ""; $("#plan-objective").textContent = "";
   $("#plan-panel").classList.add("hidden");
-  ["#resume", "#forget"].forEach(s => $(s).classList.add("hidden"));
+  ["#resume", "#forget", "#continue"].forEach(s => $(s).classList.add("hidden"));
   setStatus("running");
   showTab("log");
 }
@@ -253,7 +276,7 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.datas
 function setPlan(plan) {
   state.objective = plan.objective;
   state.tasks = {}; state.order = [];
-  for (const t of plan.subtasks) { state.tasks[t.id] = { question: t.question, status: t.status }; state.order.push(t.id); }
+  for (const t of plan.subtasks) { state.tasks[t.id] = { question: t.question, status: t.status, origin: t.origin }; state.order.push(t.id); }
   renderPlan();
 }
 function renderPlan() {
@@ -261,7 +284,7 @@ function renderPlan() {
   $("#plan-objective").textContent = state.objective;
   $("#plan-rows").innerHTML = state.order.map(id => {
     const t = state.tasks[id];
-    return `<tr><td class="id">${esc(id)}</td><td>${esc(t.question)}</td><td><span class="pill ${esc(t.status)}">${esc(t.status)}</span></td></tr>`;
+    return `<tr><td class="id">${esc(id)}</td><td>${esc(t.question)}${t.origin === "previous" ? '<span class="tag">earlier</span>' : ""}</td><td><span class="pill ${esc(t.status)}">${esc(t.status)}</span></td></tr>`;
   }).join("");
 }
 function trackTask(ev) {
@@ -312,7 +335,8 @@ function handle(ev) {
 
 async function afterFinish() {
   if (state.source) { state.source.close(); state.source = null; }
-  loadHistory();
+  loadHistory(); loadProfile();
+  $("#continue").classList.toggle("hidden", $("#v-status").textContent !== "done");
   if (!state.sid) return;
   $("#forget").classList.remove("hidden");
   try { const d = await api(`/api/sessions/${state.sid}`); renderUsage(d); maybeResume(d); } catch {}
@@ -350,7 +374,8 @@ function showRequest(ev) {
     setPlan(ev.plan);
     const rows = ev.plan.subtasks.map(t => `<tr data-id="${esc(t.id)}"><td class="id">${esc(t.id)}</td>
       <td>${esc(t.question)}<div class="meta">${esc(t.rationale)}${t.depends_on.length ? " · after " + esc(t.depends_on.join(", ")) : ""}</div></td>
-      <td><label class="inline"><input type="checkbox" checked> keep</label></td></tr>`).join("");
+      <td>${t.origin === "previous" ? '<span class="tag">earlier · done</span>'
+        : '<label class="inline"><input type="checkbox" checked> keep</label>'}</td></tr>`).join("");
     const el = card(ev, "Review the research plan", `<p class="meta">${esc(ev.plan.objective)}</p>
       <table><tbody>${rows}</tbody></table>
       <div class="stack" style="margin-top:12px">
@@ -374,7 +399,7 @@ function showRequest(ev) {
     $(".addbtn", el).onclick = addTask;
     $(".approve", el).onclick = () => (addTask(), send(ev, {
       approved: true, add: added, recency_days: parseInt($(".recency", el).value || "0", 10),
-      drop: [...el.querySelectorAll("tr")].filter(r => !$("input", r).checked).map(r => r.dataset.id),
+      drop: [...el.querySelectorAll("tr")].filter(r => $("input", r) && !$("input", r).checked).map(r => r.dataset.id),
     }));
     $(".reject", el).onclick = () => send(ev, { approved: false });
   }
@@ -435,22 +460,54 @@ async function openSession(sid) {
   if (d.report) { $("#tab-report").innerHTML = md(d.report); showTab("report"); }
   renderUsage(d); maybeResume(d);
   $("#forget").classList.remove("hidden");
+  $("#continue").classList.toggle("hidden", d.session.status !== "done");
   loadHistory();
 }
 
 // ------------------------------------------------------------------ actions
+async function startRun(topic, parent = null) {
+  const run = await api("/api/runs", { method: "POST",
+    body: { topic, engine: $("#engine").value, offline: $("#offline").checked,
+            use_profile: $("#use-profile").checked, parent_session: parent } });
+  resetView(topic);
+  state.run = run.run_id; setStatus("running");
+  if (parent) $("#v-meta").textContent = "follow-up of " + parent;
+  follow(run.run_id);
+}
 $("#start").onsubmit = async e => {
   e.preventDefault();
   const topic = $("#topic").value.trim();
   if (!topic) return;
-  try {
-    const run = await api("/api/runs", { method: "POST",
-      body: { topic, engine: $("#engine").value, offline: $("#offline").checked } });
-    resetView(topic);
-    state.run = run.run_id; setStatus("running");
-    follow(run.run_id);
-    $("#topic").value = "";
-  } catch (err) { alert(err.message); }
+  try { await startRun(topic); $("#topic").value = ""; } catch (err) { alert(err.message); }
+};
+$("#continue").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("#continue-text").value.trim();
+  if (!q || !state.sid) return;
+  try { await startRun(q, state.sid); $("#continue-text").value = ""; } catch (err) { alert(err.message); }
+};
+
+// ------------------------------------------------------------------ profile
+async function loadProfile() {
+  const { preferences } = await api("/api/profile");
+  const box = $("#profile");
+  box.innerHTML = preferences.length ? "" :
+    `<div class="meta">Empty. It learns from your answers and notes, or add your own.</div>`;
+  for (const p of preferences) {
+    const row = document.createElement("div");
+    row.className = "pref";
+    row.innerHTML = `<div><div class="cat">${esc(p.category.replace("_", " "))}</div>${esc(p.text)}</div>
+      <button class="x" type="button" title="Forget this preference" aria-label="Forget ${esc(p.text)}">×</button>`;
+    $(".x", row).onclick = async () => { await api(`/api/profile/${p.id}`, { method: "DELETE" }); loadProfile(); };
+    box.appendChild(row);
+  }
+}
+$("#pref-add").onsubmit = async e => {
+  e.preventDefault();
+  const text = $("#pref-text").value.trim();
+  if (text.length < 2) return;
+  try { await api("/api/profile", { method: "POST", body: { text } }); $("#pref-text").value = ""; loadProfile(); }
+  catch (err) { alert(err.message); }
 };
 $("#topic").onkeydown = e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#start").requestSubmit(); };
 $("#pause").onclick = () => api(`/api/runs/${state.run}/pause`, { method: "POST" }).catch(e => alert(e.message));
@@ -469,7 +526,7 @@ $("#forget").onclick = async () => {
 };
 
 // Remember engine/offline choices (per-browser convenience only).
-for (const [id, prop] of [["engine", "value"], ["offline", "checked"]]) {
+for (const [id, prop] of [["engine", "value"], ["offline", "checked"], ["use-profile", "checked"]]) {
   try { const v = localStorage.getItem("rootlogic." + id); if (v !== null) $("#" + id)[prop] = JSON.parse(v); } catch {}
   $("#" + id).addEventListener("change", e => {
     try { localStorage.setItem("rootlogic." + id, JSON.stringify(e.target[prop])); } catch {}
@@ -478,7 +535,7 @@ for (const [id, prop] of [["engine", "value"], ["offline", "checked"]]) {
 
 // Re-attach to a live run after a page refresh.
 (async () => {
-  await loadHistory();
+  await Promise.all([loadHistory(), loadProfile()]);
   const live = (await api("/api/runs")).filter(r => r.status === "running").pop();
   if (live) { resetView(live.topic); state.run = live.run_id; setStatus("running"); follow(live.run_id); }
 })();
