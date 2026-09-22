@@ -233,9 +233,7 @@ class ResearchGraph:
         plan.subtasks = [SubTask.model_validate(t) for t in s.get("previous_tasks", [])] \
             + plan.subtasks
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
-        new, earlier = continuity.new_task_count(plan), len(plan.subtasks)
-        carried = f" (+{earlier - new} from earlier research)" if earlier > new else ""
-        self._emit("plan.created", f"Plan: {new} new sub-tasks{carried}, {recency}",
+        self._emit("plan.created", f"Plan: {continuity.describe_tasks(plan)}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
         return {"plan": plan.model_dump()}
 
@@ -250,7 +248,7 @@ class ResearchGraph:
         plan = Plan.model_validate(decision["plan"])
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
-        self._emit("plan.approved", f"Plan approved with {len(plan.subtasks)} sub-tasks")
+        self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
         self.store.update_session(self.sid, plan_json=plan.model_dump_json())
         return Command(goto="dispatch", update={"plan": decision["plan"]})
 

@@ -73,7 +73,7 @@ class Orchestrator:
             if reviewed is None:
                 raise Aborted("plan rejected")
             plan = reviewed
-            self._emit("plan.approved", f"Plan approved with {len(plan.subtasks)} sub-tasks")
+            self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
             self._save_plan(plan)
             self._research_loop(plan)
             analysis = self._analyze(plan)
@@ -145,9 +145,7 @@ class Orchestrator:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
         continuity.merge_previous(plan, self.previous)
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
-        new, earlier = continuity.new_task_count(plan), len(plan.subtasks)
-        carried = f" (+{earlier - new} from earlier research)" if earlier > new else ""
-        self._emit("plan.created", f"Plan: {new} new sub-tasks{carried}, {recency}",
+        self._emit("plan.created", f"Plan: {continuity.describe_tasks(plan)}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
         return plan
 

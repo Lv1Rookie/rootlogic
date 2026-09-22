@@ -207,3 +207,19 @@ def test_parent_id_migration_for_old_databases(tmp_path):
     assert store.session("old1")["parent_id"] is None
     assert store.session(store.create_session("new", parent_id="old1"))["parent_id"] == "old1"
 
+
+
+@pytest.mark.parametrize("kind", ENGINES)
+def test_plan_messages_count_new_and_earlier_tasks_consistently(tmp_path, kind):
+    store = Store(tmp_path / "rl.db")
+    first, _, ui1 = engine(kind, store, tmp_path)
+    first.run(TOPIC)
+    msgs = {e.type: e.message for e in ui1.events}
+    assert msgs["plan.created"].startswith("Plan: 3 sub-tasks,")
+    assert msgs["plan.approved"] == "Plan approved: 3 sub-tasks"
+
+    second, _, ui2 = engine(kind, store, tmp_path)
+    second.run("How are unions responding?", parent=first.sid)
+    msgs = {e.type: e.message for e in ui2.events}
+    assert msgs["plan.created"].startswith("Plan: 3 new sub-tasks (+3 from earlier research),")
+    assert msgs["plan.approved"] == "Plan approved: 3 new sub-tasks (+3 from earlier research)"

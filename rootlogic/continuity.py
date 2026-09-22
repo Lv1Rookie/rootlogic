@@ -160,3 +160,12 @@ def merge_previous(plan: Plan, prev: Previous | None) -> Plan:
 def new_task_count(plan: Plan) -> int:
     """Tasks that count against this session's budget (earlier research is free)."""
     return sum(1 for t in plan.subtasks if t.origin != "previous")
+
+
+def describe_tasks(plan: Plan) -> str:
+    """'3 sub-tasks', or '3 new sub-tasks (+3 from earlier research)' in a follow-up."""
+    new = new_task_count(plan)
+    earlier = len(plan.subtasks) - new
+    if not earlier:
+        return f"{new} sub-tasks"
+    return f"{new} new sub-tasks (+{earlier} from earlier research)"
