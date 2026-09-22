@@ -47,7 +47,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 167 tests, no network
+pytest                       # 169 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection

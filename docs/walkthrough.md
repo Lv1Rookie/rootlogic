@@ -236,7 +236,7 @@ check that:
   unscreened by accident.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 167 tests run in a few seconds with no internet.
+is added first. All 169 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 

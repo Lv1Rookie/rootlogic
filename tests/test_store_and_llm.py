@@ -195,3 +195,31 @@ def test_research_loop_caches_the_prefix_and_gives_up_on_a_dead_search_tool():
 
     assert len(messages.calls) == 2                       # stops instead of burning 8 turns
     assert messages.calls[0]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_billing_failure_stops_the_run_instead_of_retrying(tmp_path, kind):
+    """Live run: running out of credits printed 'retrying' per sub-task. Every later call
+    would fail the same way, so a credentials/billing error must end the run at once."""
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.llm import AuthError
+    from rootlogic.models import FindingDraft
+    from rootlogic.orchestrator import Orchestrator
+
+    from .test_orchestrator import TODAY, ScriptedUI
+
+    def broke(prompt):
+        raise AuthError("The Anthropic API account is out of credits.")
+
+    store = Store()
+    ui = ScriptedUI()
+    llm = FakeLLM(handlers={FindingDraft: broke})
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(llm, store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(llm, store, ui, **kw))
+
+    with pytest.raises(AuthError):
+        engine.run("impact of generative AI on newsrooms")
+    assert "task.retry" not in ui.types()
+    assert store.session(engine.sid)["status"] == "failed"

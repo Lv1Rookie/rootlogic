@@ -19,7 +19,7 @@ from .filters import SourcePolicy
 from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
 from .control import Command, Control, Event, Interaction
-from .llm import LLM, AgentRefusal, LLMError
+from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
                      Report, ReportDraft, SubTask, SubTaskDraft)
 from .store import Store
@@ -205,6 +205,8 @@ class Orchestrator:
                 t = futures[fut]
                 try:
                     result = fut.result()
+                except AuthError:
+                    raise   # credentials or billing: every other call will fail too
                 except (LLMError, AgentRefusal) as e:
                     self._task_failed(t, str(e))
                     continue

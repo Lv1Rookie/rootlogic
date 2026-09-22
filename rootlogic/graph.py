@@ -45,7 +45,7 @@ from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction
-from .llm import LLM, AgentRefusal, LLMError
+from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
                      Report, ReportDraft, SearchHit, SubTask, SubTaskDraft)
 from .orchestrator import Budget
@@ -313,6 +313,8 @@ class ResearchGraph:
                                             schema=FindingDraft,
                                             max_searches=self.budget.max_searches,
                                             recency_days=plan.recency_days)
+        except AuthError:
+            raise   # credentials or billing: every other call will fail too
         except (LLMError, AgentRefusal) as e:
             return {"raw": [{"task_id": task.id, "error": str(e)}]}
         return {"raw": [{"task_id": task.id, "draft": draft.model_dump(),
