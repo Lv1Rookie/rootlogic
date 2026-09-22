@@ -47,11 +47,13 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 157 tests, no network
+pytest                       # 162 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
-rounds · `--max-tasks N` · `--parallel N` sub-agents · `--searches N` per sub-agent ·
+rounds · `--max-tasks N` · `--parallel N` sub-agents · `--searches N` per sub-agent
+(default 8; under 5 the web tools call search directly, because dynamic filtering batches
+searches and can exhaust a small budget before any result returns) ·
 `--zdr` Zero Data Retention mode (also on `resume` and `web`): sets `allowed_callers: ["direct"]`
 on the web tools, which makes them ZDR-eligible but turns off dynamic filtering, so searches may
 use more context tokens.
