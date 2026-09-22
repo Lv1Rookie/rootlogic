@@ -70,6 +70,7 @@ def test_harmful_case_passes_only_on_refusal(tmp_path):
     assert refused.passed and refused.status == "refused"
     answered = run_case(case, factory(tmp=tmp_path), today=TODAY)
     assert not answered.passed and "expected a refusal" in answered.reasons[0]
+    assert answered.status == "done"
 
 
 def test_contested_and_recency_rules(tmp_path):

@@ -228,7 +228,7 @@ check that:
 - The evaluation harness scores facts, hoaxes, contradictions, stale sources and refusals correctly.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 132 tests run in a few seconds with no internet.
+is added first. All 157 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -252,6 +252,7 @@ and `profile`. Useful flags on `research`:
 | `--provider openai --model … [--base-url …]` | Runs on another model (Step 17) |
 | `--block` / `--only DOMAIN` | Source rules for one run (Step 18) |
 | `--verify-claims N` / `--no-verify` | How many claims to verify against their pages (Step 18) |
+| `--moderation {auto,none,openai,llama-guard}` | Content screening for non-Claude models (Step 19) |
 
 Two more commands came with Step 18: `rootlogic sources` (manage website rules) and
 `rootlogic eval` (run the evaluation set).
@@ -432,7 +433,39 @@ Honest limits to explain in a demo:
 - The hoax judge is a model too.
 - A live evaluation costs money.
 
-## Step 19: Check it, then publish
+## Step 19: Screening content for models without safety systems → [`moderation.py`](../rootlogic/moderation.py)
+
+Claude runs Anthropic's safety classifiers on every request. An arbitrary OpenAI-compatible or
+local model may have none, so `--provider openai` needed its own screening. Three checkpoints,
+used by both engines through one shared `ModerationGate`:
+
+1. **The request**, before any research runs. A blocked topic ends the session as `blocked`, and
+   nothing is ever sent to the model.
+2. **Your input during a run**: clarifying answers, notes, tasks you add by hand. Flagged input
+   is ignored (it never reaches a prompt) but doesn't end the run.
+3. **The report**, before it is saved or shown. A blocked report is not written to disk.
+
+Two backends: OpenAI's moderation endpoint (free with an API key) and **Llama Guard 3** through
+any OpenAI-compatible server, which keeps a local setup fully offline.
+
+The judgement call worth explaining in a demo: a research tool for journalists must be able to
+*discuss* violence, crime, health and elections. So each backend's categories split in two:
+
+| | Examples | What happens |
+|---|---|---|
+| **Block** | weapons instructions, sexual content involving minors, self-harm instructions | the run stops |
+| **Warn** | violence, specialised (medical/legal) advice, defamation | noted in the report's "Confidence and limitations" |
+
+`--moderation-strict` blocks on every flag instead. Two more decisions:
+- **Fail closed:** if the moderation service is unreachable, the run stops rather than
+  continuing unscreened.
+- **No silent default:** a non-Claude model with no moderation available refuses to start and
+  explains the three options, rather than quietly running unscreened.
+
+The evaluation harness counts a moderation block as a refusal, so the harmful cases pass either
+way: the model refuses, or moderation stops it.
+
+## Step 20: Check it, then publish
 
 Every change went through the same routine:
 
@@ -457,7 +490,8 @@ Every change went through the same routine:
    OpenAI-compatible adapter. Trying it free with Ollama is a good first test.
 2. **Read the code in this order:** `models.py` → `orchestrator.py` (start with `run()`) →
    `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → `tools.py` →
-   `openai_llm.py` → `verify.py` → `evaluate.py` → the tests → `graph.py` → `web.py`.
+   `openai_llm.py` → `verify.py` → `moderation.py` → `evaluate.py` → the tests → `graph.py` →
+   `web.py`.
 3. **Rehearse the demo:**
    - A vague topic (shows clarifying questions).
    - Editing the plan.
@@ -483,6 +517,8 @@ Every change went through the same routine:
      controls them.
    - Which guardrails are model judgments and which are code, and why the verbatim-quote
      check matters.
+   - Why non-Claude models need their own moderation step, and why sensitive topics are
+     warned about rather than blocked.
    - What the evaluation proves and what it can't.
 
 For wider context, read the two research notes:

@@ -181,9 +181,10 @@ def test_non_strict_tools_omit_strict_flag():
 
 
 @pytest.mark.parametrize("kw,message", [
-    (dict(provider="openai", search="tavily"), "needs --model"),
-    (dict(provider="openai", model="m"), "needs --search tavily"),
-    (dict(provider="openai", model="m", search="tavily", zdr=True), "Claude's web tools only"),
+    (dict(provider="openai", search="tavily", moderation="none"), "needs --model"),
+    (dict(provider="openai", model="m", moderation="none"), "needs --search tavily"),
+    (dict(provider="openai", model="m", search="tavily", zdr=True, moderation="none"),
+     "Claude's web tools only"),
     (dict(base_url="http://x"), "--base-url is for --provider openai"),
     (dict(provider="gemini"), "unknown provider"),
 ])
@@ -195,10 +196,11 @@ def test_backend_rejects_invalid_combinations(kw, message):
 def test_backend_builds_openai_adapter(monkeypatch):
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
     llm = Backend(provider="openai", model="llama3.3", base_url="http://localhost:11434/v1",
-                  search="tavily", prices=(0.0, 0.0)).make_llm(lambda u: None)
+                  search="tavily", prices=(0.0, 0.0),
+                  moderation="none").make_llm(lambda u: None)
     assert isinstance(llm, OpenAICompatibleLLM)
     assert str(llm.client.base_url).startswith("http://localhost:11434/v1")
-    assert Backend().label == "anthropic:claude-opus-5 · search: anthropic"
+    assert Backend().label == ("anthropic:claude-opus-5 · search: anthropic · moderation: none")
 
 
 def test_parse_prices():
@@ -210,5 +212,5 @@ def test_parse_prices():
 def test_cli_reports_invalid_backend_cleanly(tmp_path, capsys):
     from rootlogic.cli import main
     code = main(["--db", str(tmp_path / "x.db"), "research", "--provider", "openai",
-                 "--model", "m", "-y", "topic"])
+                 "--model", "m", "--moderation", "none", "-y", "topic"])
     assert code == 2 and "needs --search tavily" in capsys.readouterr().out

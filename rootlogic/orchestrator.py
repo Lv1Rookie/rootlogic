@@ -16,6 +16,7 @@ from pathlib import Path
 from . import context as ctx
 from . import continuity, verify
 from .filters import SourcePolicy
+from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
 from .control import Command, Control, Event, Interaction
 from .llm import LLM, AgentRefusal, LLMError
@@ -26,6 +27,8 @@ from .store import Store
 
 class Aborted(Exception):
     pass
+
+
 
 
 @dataclass
@@ -41,7 +44,7 @@ class Orchestrator:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, budget: Budget | None = None,
                  reports_dir: Path | str = "reports", today: date | None = None,
                  blocked_domains: tuple[str, ...] = (), use_profile: bool = True,
-                 source_policy: SourcePolicy | None = None):
+                 source_policy: SourcePolicy | None = None, moderator: Moderator | None = None):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -51,6 +54,7 @@ class Orchestrator:
         self.blocked_domains = blocked_domains
         self.use_profile = use_profile          # read + learn the user's standing preferences
         self.source_policy = source_policy      # None: load the user's saved source rules
+        self.moderation = ModerationGate(moderator, self._emit)  # request, user input, report
         self.policy = SourcePolicy()
         self.policy_drops = 0
         self.evidence: dict[str, str] = {}      # normalized url -> fetched page text
@@ -71,6 +75,7 @@ class Orchestrator:
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}”")
         try:
+            self.moderation.request(topic)
             self._load_profile()
             self._load_policy()
             self._continue_from(previous)
@@ -81,6 +86,7 @@ class Orchestrator:
             if reviewed is None:
                 raise Aborted("plan rejected")
             plan = reviewed
+            self._screen_user_tasks(plan)  # tasks the user typed into the plan
             self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
             self._save_plan(plan)
             self._research_loop(plan)
@@ -90,6 +96,10 @@ class Orchestrator:
         except Aborted as e:
             self.store.update_session(self.sid, status="aborted")
             self._emit("session.aborted", f"Aborted: {e}")
+            return None
+        except Blocked as e:
+            self.store.update_session(self.sid, status="blocked")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}")
             return None
         except (LLMError, AgentRefusal) as e:
             self.store.update_session(self.sid, status="failed")
@@ -302,6 +312,7 @@ class Orchestrator:
                    f"{len(quality.uncited_statements)} uncited statement(s), "
                    f"{len(quality.weak_takeaways)} weakly sourced takeaway(s)",
                    invalid=quality.invalid_citations)
+        self.moderation.report(report, plan.topic)
 
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         path = self.reports_dir / f"{self.sid}-{_slug(plan.topic)}.md"
@@ -317,6 +328,11 @@ class Orchestrator:
                    f"{usage['input_tokens'] + usage['output_tokens']:,} tokens · "
                    f"${usage['cost_usd']:.2f}", path=str(path))
         return report
+
+    def _screen_user_tasks(self, plan: Plan) -> None:
+        for t in [t for t in plan.subtasks if t.origin == "user"]:
+            if self.moderation.input_blocked(t.question, "added task"):
+                plan.subtasks.remove(t)
 
     def _learn_profile(self, topic: str) -> None:
         """Best effort: a failed profile update never fails the finished research."""
@@ -339,6 +355,8 @@ class Orchestrator:
         for q in questions:
             self.store.add_message(self.sid, "agent", "clarifying_question", q)
             answer = self.ui.ask(q).strip()
+            if answer and self.moderation.input_blocked(answer, "answer"):
+                continue
             if answer:
                 self.store.add_message(self.sid, "user", "answer", answer)
                 self.context.append(f"Q: {q}\nA: {answer}")
@@ -371,6 +389,8 @@ class Orchestrator:
                 t.status = "skipped"
                 self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
                 self._emit("override.skip", f"User skipped [{t.id}] {t.question}")
+        elif cmd.action in ("add", "note") and self.moderation.input_blocked(cmd.arg, cmd.action):
+            return
         elif cmd.action == "add":
             draft = SubTaskDraft(question=cmd.arg, rationale="Requested by user",
                                  search_queries=[cmd.arg], depends_on=[])

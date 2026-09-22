@@ -7,9 +7,11 @@ stack trace halfway through a run.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from .llm import MODEL, UsageSink
+from .moderation import Moderator
 
 
 class BackendError(ValueError):
@@ -25,10 +27,16 @@ class Backend:
     zdr: bool = False                    # Claude hosted web tools in Zero-Data-Retention mode
     strict: bool = True                  # strict JSON-schema outputs/tools (openai provider)
     prices: tuple[float, float] | None = None  # $/MTok (input, output) for non-Claude models
+    moderation: str = "auto"             # auto | none | openai | llama-guard
+    moderation_model: str | None = None  # llama-guard: model id (default llama-guard3)
+    moderation_base_url: str | None = None
+    moderation_strict: bool = False      # block on every flag, not just harm-enabling ones
 
     def validate(self) -> Backend:
         if self.provider not in ("anthropic", "openai"):
             raise BackendError(f"unknown provider {self.provider!r}")
+        if self.moderation not in ("auto", "none", "openai", "llama-guard"):
+            raise BackendError(f"unknown moderation {self.moderation!r}")
         if self.provider == "openai":
             if not self.model:
                 raise BackendError("--provider openai needs --model (e.g. gpt-5-mini, llama3.3)")
@@ -39,13 +47,40 @@ class Backend:
                 raise BackendError("--zdr applies to Claude's web tools only")
         elif self.base_url:
             raise BackendError("--base-url is for --provider openai")
+        self.resolved_moderation()   # last: the safety default, after the obvious mistakes
         return self
+
+    def resolved_moderation(self) -> str:
+        """Claude screens content itself; other models need a moderator or an explicit opt-out."""
+        if self.moderation != "auto":
+            return self.moderation
+        if self.provider == "anthropic":
+            return "none"
+        if os.environ.get("OPENAI_API_KEY"):
+            return "openai"
+        raise BackendError(
+            "non-Claude models have no built-in safety screening. Set OPENAI_API_KEY to use "
+            "OpenAI's free moderation API, or --moderation llama-guard with a local Llama Guard "
+            "(ollama pull llama-guard3), or --moderation none to run unscreened.")
 
     @property
     def label(self) -> str:
         model = self.model or (MODEL if self.provider == "anthropic" else "?")
         where = f" @ {self.base_url}" if self.base_url else ""
-        return f"{self.provider}:{model}{where} · search: {self.search}"
+        return (f"{self.provider}:{model}{where} · search: {self.search} · moderation: "
+                f"{self.resolved_moderation()}")
+
+    def make_moderator(self) -> Moderator | None:
+        choice = self.resolved_moderation()
+        if choice == "none":
+            return None
+        if choice == "openai":
+            from .moderation import OpenAIModerator
+            return OpenAIModerator(strict=self.moderation_strict)
+        from .moderation import LlamaGuardModerator
+        return LlamaGuardModerator(
+            base_url=self.moderation_base_url or self.base_url or "http://localhost:11434/v1",
+            model=self.moderation_model or "llama-guard3", strict=self.moderation_strict)
 
     def make_llm(self, usage_sink: UsageSink):
         from .search import get_search_provider

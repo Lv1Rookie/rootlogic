@@ -20,7 +20,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     topic TEXT NOT NULL,
-    status TEXT NOT NULL,              -- running | done | aborted | failed | interrupted
+    status TEXT NOT NULL,              -- running | done | aborted | failed | blocked | interrupted
     created_at TEXT NOT NULL,
     finished_at TEXT,
     plan_json TEXT,
@@ -145,7 +145,7 @@ class Store:
     def update_session(self, sid: str, **fields: Any) -> None:
         if "related_topics" in fields:
             fields["related_topics"] = json.dumps(fields["related_topics"])
-        if fields.get("status") in ("done", "aborted", "failed"):
+        if fields.get("status") in ("done", "aborted", "failed", "blocked"):
             fields["finished_at"] = now()
         cols = ", ".join(f"{k} = ?" for k in fields)
         self._exec(f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), sid))

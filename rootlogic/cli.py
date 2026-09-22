@@ -153,14 +153,16 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
     else:
         llm = (backend or Backend()).make_llm(usage_sink)
 
+    moderator = None if offline else (backend or Backend()).make_moderator()
     if engine == "graph":
         from .graph import ResearchGraph
         eng = ResearchGraph(llm, store, ui, checkpoint_path=home / "checkpoints.db",
                             budget=budget, reports_dir=home / "reports", use_profile=use_profile,
-                            source_policy=source_policy)
+                            source_policy=source_policy, moderator=moderator)
     else:
         eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports",
-                           use_profile=use_profile, source_policy=source_policy)
+                           use_profile=use_profile, source_policy=source_policy,
+                           moderator=moderator)
     holder["e"] = eng
     return eng
 
@@ -444,6 +446,14 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
                         "own SearchProvider tools (needs TAVILY_API_KEY)")
     g.add_argument("--zdr", action="store_true",
                    help="Zero Data Retention: Claude web tools without dynamic filtering")
+    g.add_argument("--moderation", choices=["auto", "none", "openai", "llama-guard"],
+                   default="auto",
+                   help="screen request, user input and report; auto = none for Claude "
+                        "(built-in safety), OpenAI moderation otherwise")
+    g.add_argument("--moderation-model", help="llama-guard: model id (default llama-guard3)")
+    g.add_argument("--moderation-base-url", help="llama-guard: server (default Ollama's)")
+    g.add_argument("--moderation-strict", action="store_true",
+                   help="block on every flag, not only harm-enabling categories")
 
 
 def add_quality_args(p: argparse.ArgumentParser) -> None:
@@ -458,7 +468,11 @@ def add_quality_args(p: argparse.ArgumentParser) -> None:
 
 
 def backend_from_args(args: argparse.Namespace) -> Backend:
-    return Backend(provider=getattr(args, "provider", "anthropic"),
+    return Backend(moderation=getattr(args, "moderation", "auto"),
+                   moderation_model=getattr(args, "moderation_model", None),
+                   moderation_base_url=getattr(args, "moderation_base_url", None),
+                   moderation_strict=getattr(args, "moderation_strict", False),
+                   provider=getattr(args, "provider", "anthropic"),
                    model=getattr(args, "model", None), base_url=getattr(args, "base_url", None),
                    search=getattr(args, "search", "anthropic"), zdr=getattr(args, "zdr", False),
                    strict=not getattr(args, "no_strict", False),

@@ -47,7 +47,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 132 tests, no network
+pytest                       # 157 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -123,6 +123,7 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `openai_llm.py` | `OpenAICompatibleLLM`: the same `LLM` interface over Chat Completions (OpenAI, Ollama, vLLM, OpenRouter …). |
 | `backend.py` | Which model and search a run uses; validates combinations up front. |
 | `tools.py` | Our client-side `web_search`/`web_fetch` tools and their budgets, shared by both adapters. |
+| `moderation.py` | Screens request, user input and report for models without built-in safety (OpenAI moderation, Llama Guard 3). |
 | `verify.py` | Guardrails: claim verification, corroboration labels and report checks. |
 | `evaluate.py` + `evals/cases.json` | Evaluation harness and cases (`rootlogic eval`). |
 | `search.py` | `SearchProvider` protocol (`search`, `fetch`) + `TavilySearch`, `StaticSearch`. The model-agnostic path for web access. |
@@ -195,6 +196,11 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
   record $0.
 - Claude-only features don't apply: `--zdr`, effort levels, and server-side refusal fallback.
   Refusals and content filtering from the other provider are still detected and reported.
+- **Moderation is required, because an arbitrary model may have no safety system.** With
+  `OPENAI_API_KEY` set, OpenAI's free moderation endpoint is used automatically. Fully local?
+  `ollama pull llama-guard3` and `--moderation llama-guard`. To run unscreened, say so:
+  `--moderation none`. `--moderation-strict` blocks on every flag, not only harm-enabling ones.
+  If the moderation service can't be reached, the run stops rather than continuing unscreened.
 - Invalid combinations are rejected before anything runs (`rootlogic/backend.py`).
 - Smaller local models are noticeably weaker at planning, strict schemas and faithful citation.
   Consider a larger model when quality matters.
@@ -211,6 +217,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
 | **Report checks** | `[n]` citations pointing at no source become `[?]`. Uncited factual-looking sentences and takeaways citing only low-credibility sources are listed. Every report ends with **Confidence and limitations** and a **Claim check** table. | code |
 | **Refusals** | Claude's safety checks (with server-side fallback) and the other provider's `refusal`/`content_filter` stop harmful requests. | model |
+| **Moderation** (non-Claude) | Screens the request, your mid-run input and the finished report. Harmful requests and reports stop the run (`blocked`); sensitive-but-legitimate flags are noted in the report instead. | model (OpenAI moderation or Llama Guard), code decides |
 
 **Proof: the evaluation set.** [`evals/cases.json`](evals/cases.json) holds 20 cases: known
 facts, hoaxes the agent must not repeat, contested questions, time-sensitive topics, and harmful

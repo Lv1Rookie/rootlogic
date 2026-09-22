@@ -247,6 +247,8 @@ class ReportQuality(BaseModel):
     uncited_statements: list[str] = []       # factual-looking sentences with no [n]
     weak_takeaways: list[str] = []           # takeaways citing only low-credibility sources
     policy_drops: int = 0                    # sources removed by the user's source rules
+    moderation_warnings: list[str] = []      # sensitive-content flags that didn't block
+    moderation_provider: str = ""
 
     @property
     def supported_ratio(self) -> float | None:
@@ -317,6 +319,10 @@ class Report(BaseModel):
         if q.weak_takeaways:
             lines.append(f"- **Weakly sourced takeaways:** {len(q.weak_takeaways)} cite only "
                          "low-credibility sources.")
+        if q.moderation_warnings:
+            lines.append(f"- **Content flags ({q.moderation_provider}, not blocking):** "
+                         f"{', '.join(q.moderation_warnings)}. The report covers sensitive "
+                         "subject matter; read it with that in mind.")
         if q.policy_drops:
             lines.append(f"- **Your source rules** removed {q.policy_drops} source(s).")
         lines.append("- Verification checks claims against the text of cited pages; it cannot "

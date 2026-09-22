@@ -41,6 +41,7 @@ from langgraph.types import Command, Send, interrupt
 from . import context as ctx
 from . import continuity, verify
 from .filters import SourcePolicy
+from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction
@@ -89,7 +90,8 @@ class ResearchGraph:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, checkpoint_path: str | Path,
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
                  today: date | None = None, blocked_domains: tuple[str, ...] = (),
-                 use_profile: bool = True, source_policy: SourcePolicy | None = None):
+                 use_profile: bool = True, source_policy: SourcePolicy | None = None,
+                 moderator: Moderator | None = None):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -99,6 +101,7 @@ class ResearchGraph:
         self.blocked_domains = blocked_domains
         self.use_profile = use_profile
         self.source_policy = source_policy   # None: the user's saved rules, read when needed
+        self.moderation = ModerationGate(moderator, self._emit)
         self.control = Control()
         self.sid = ""
         if str(checkpoint_path) != ":memory:":
@@ -224,6 +227,8 @@ class ResearchGraph:
         added = []
         for q, a in zip(questions, answers):
             self.store.add_message(self.sid, "agent", "clarifying_question", q)
+            if a.strip() and self.moderation.input_blocked(a, "answer"):
+                continue
             if a.strip():
                 self.store.add_message(self.sid, "user", "answer", a.strip())
                 added.append(f"Q: {q}\nA: {a.strip()}")
@@ -259,6 +264,9 @@ class ResearchGraph:
             self._emit("session.aborted", "Aborted: plan rejected")
             return Command(goto=END, update={"status": "aborted"})
         plan = Plan.model_validate(decision["plan"])
+        for t in [t for t in plan.subtasks if t.origin == "user"]:
+            if self.moderation.input_blocked(t.question, "added task"):
+                plan.subtasks.remove(t)
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
         self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
@@ -423,6 +431,12 @@ class ResearchGraph:
                    f"{len(quality.uncited_statements)} uncited statement(s), "
                    f"{len(quality.weak_takeaways)} weakly sourced takeaway(s)",
                    invalid=quality.invalid_citations)
+        try:
+            self.moderation.report(report, plan.topic)
+        except Blocked as e:
+            self.store.update_session(self.sid, status="blocked")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}")
+            return {"status": "blocked"}
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-z0-9]+", "-", plan.topic.lower()).strip("-")[:50] or "report"
         path = self.reports_dir / f"{self.sid}-{slug}.md"
@@ -490,6 +504,9 @@ class ResearchGraph:
                 t.status = "skipped"
                 self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
                 self._emit("override.skip", f"User skipped [{t.id}] {t.question}")
+            elif cmd.action in ("add", "note") and cmd.arg and \
+                    self.moderation.input_blocked(cmd.arg, cmd.action):
+                continue
             elif cmd.action == "add" and cmd.arg:
                 self._add_tasks(plan, [SubTaskDraft(question=cmd.arg, rationale="Requested by user",
                                                     search_queries=[cmd.arg], depends_on=[])],
@@ -518,6 +535,12 @@ class ResearchGraph:
         self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}” (LangGraph engine)")
+        try:
+            self.moderation.request(topic)
+        except Blocked as e:
+            self.store.update_session(self.sid, status="blocked")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}")
+            return None
         state: dict[str, Any] = {"session_id": self.sid, "topic": topic}
         if parent:
             state["parent"] = parent
