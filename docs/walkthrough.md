@@ -31,7 +31,7 @@ Every line of the assignment PDF was mapped to a feature before any code was wri
 | Search online, filter outdated/irrelevant | Research workers with web search + source filter rules |
 | Ask clarifying questions, adapt | Clarify step before planning; reflect step during the run |
 | Summaries per source (bonus) | Each source gets a summary and key takeaways |
-| Long-term memory (bonus) | Past sessions are searchable, feed new plans, and suggest topics |
+| Long-term memory (bonus) | Past sessions feed new plans and suggest topics; a learned user profile; follow-up threads that build on earlier findings |
 | Action log + override (bonus) | Every step is logged; plan approve/edit; Ctrl-C pause menu |
 | Testable orchestration code | LLM hidden behind a small interface, so tests swap in a fake |
 
@@ -66,7 +66,13 @@ You → Clarify → Plan → [you approve] → Workers research in parallel
 | **Rich** | Nicely formatted terminal output: tables, colors, prompts |
 | **Pydantic** | Defines data shapes and validates what the LLM returns |
 
-LangGraph was added later as a second engine. See Step 13.
+Added later, each for a specific reason:
+
+| Addition | Why | Step |
+|---|---|---|
+| **LangGraph** | A second engine with checkpointing and resume | 13 |
+| **FastAPI** | A web UI that streams progress to the browser | 14 |
+| **Tavily** (optional) | Web search that doesn't depend on one LLM vendor | 15 |
 
 ## Step 4: Define the data shapes first → [`models.py`](../rootlogic/models.py)
 
@@ -100,7 +106,8 @@ This file also:
 - Handles `pause_turn`, a signal that a long search turn paused partway and needs to be resumed.
 
 **Why wrap it:** this boundary is what makes a `FakeLLM` for tests possible. It also means
-switching to another provider later only touches one file.
+switching to another provider later only touches one file. Step 15 finishes that job for web
+search, which was the one part still tied to Claude.
 
 ## Step 6: Write the orchestrator → [`orchestrator.py`](../rootlogic/orchestrator.py)
 
@@ -148,21 +155,26 @@ calls an `Interaction` object for four things: `ask`, `review_plan`, `override` 
 
 ## Step 9: Storage → [`store.py`](../rootlogic/store.py)
 
-One SQLite file holds seven tables, all keyed by session:
+One SQLite file holds eight tables. All except `preferences` are keyed by session:
 
 | Table | What it holds |
 |---|---|
-| `sessions` | topic, status, plan, summary, related topics, report path |
-| `messages` | the conversation with the user (questions, answers, notes) |
+| `sessions` | topic, status, plan, summary, related topics, report path, and `parent_id` for follow-ups |
+| `messages` | the conversation with the user (questions, answers, notes, context inherited by a follow-up) |
 | `events` | the full action log |
 | `tasks` | each sub-task's status and finding |
 | `sources` | every source seen, kept or dropped (with the reason) |
 | `llm_calls` | tokens in/out, cache usage, web searches and dollar cost per call |
 | `memory_fts` | full-text search index over past sessions, which powers recall and topic suggestions |
+| `preferences` | the user's standing preferences (the learned profile, Step 16) |
+
+The LangGraph engine also saves its checkpoints in a second file, `checkpoints.db`. New columns
+are added to older databases automatically on startup, so an upgrade never loses history.
 
 ## Step 10: Prompts → [`prompts.py`](../rootlogic/prompts.py)
 
-Each role has its own short instructions: clarifier, planner, researcher, critic, analyst and writer.
+Each role has its own short instructions: clarifier, planner, researcher, critic, analyst,
+writer, and a profiler that extracts lasting user preferences (Step 16).
 Two details are worth knowing:
 
 - **Prompt-injection defense:** the researcher is told that web pages are *untrusted data*
@@ -183,10 +195,14 @@ check that:
 - Overrides (skip/add/note/stop/abort) work.
 - A failing worker doesn't crash the session.
 - Memory recalls past topics.
-- The LangGraph engine resumes after a crash.
+- The LangGraph engine resumes after a crash, and saves the same log details as the loop engine.
 - The web API round-trips questions, plan edits and overrides, and replays SSE.
+- The search tools enforce their limits, and Tavily requests and responses map correctly.
+- The profile is learned, used, edited and can be switched off.
+- Follow-ups reuse earlier findings, chain, and don't count earlier tasks against the budget.
 
-All 79 tests run in under a second with no internet.
+Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
+is added first. All 81 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -196,8 +212,17 @@ It shows:
 - The plan table, with approve/edit.
 - The override menu when you press Ctrl-C.
 
-It also adds the commands `history`, `log`, `usage`, `show`, `forget`, `resume`, `graph` and `web`.
-`--offline` runs everything on the fake LLM, which makes the demo safe from network problems.
+It also adds the commands `history`, `log`, `usage`, `show`, `forget`, `resume`, `graph`, `web`
+and `profile`. Useful flags on `research`:
+
+| Flag | What it does |
+|---|---|
+| `--offline` | Runs everything on the fake LLM, so the demo is safe from network problems |
+| `--engine graph` | Uses the LangGraph engine (Step 13) |
+| `--follow-up <id>` | Continues an earlier session (Step 16) |
+| `--search tavily` | Uses our own search tools instead of Claude's (Step 15) |
+| `--zdr` | Zero Data Retention mode for Claude's web tools (Step 15) |
+| `--no-profile` | Doesn't use or update the learned profile for this run (Step 16) |
 
 ## Step 13: A second engine with LangGraph → [`graph.py`](../rootlogic/graph.py)
 
@@ -230,6 +255,8 @@ another implementation of `Interaction`.
   replays the stream, and rebuilds the page.
 - The page is one HTML file with plain JavaScript (no build step). Report Markdown is
   sanitized before display, because it originates from web content.
+- Later additions: a **Your profile** panel in the sidebar, and a **Continue this research**
+  box on finished sessions (both Step 16).
 
 Testing it in a real browser caught two bugs the unit tests missed:
 - A new task could reuse an existing id after the user dropped one. `Plan.next_id()` now
@@ -237,7 +264,30 @@ Testing it in a real browser caught two bugs the unit tests missed:
 - Sessions orphaned by a server restart stayed "running" forever. They're now marked
   `interrupted` on startup, and graph-engine ones can be resumed.
 
-## Step 15: Memory that makes research better → [`continuity.py`](../rootlogic/continuity.py)
+## Step 15: Swappable web search → [`search.py`](../rootlogic/search.py)
+
+The `LLM` interface (Step 5) made the model swappable in principle, but web search still used
+Claude's built-in tools, which only work with Claude. So search got its own interface:
+
+- **`SearchProvider`** has two methods: `search(query, max_results, recency_days)` and
+  `fetch(url)`. `TavilySearch` implements it with the Tavily API, and `StaticSearch` returns
+  canned results for tests.
+- With `--search tavily`, subagents get **our own** `web_search` and `web_fetch` tools, which
+  call the provider. This path uses only plain tool calling, which almost every modern model
+  supports. That makes it the path another model's adapter would use.
+- Because our code now runs the tools, our code enforces the limits: the search cap and 3 page
+  fetches per subagent. All results go back in one message, and long pages are cut off with a
+  visible `[truncated]` note, never silently.
+
+Two related changes, both found by a research pass over the code:
+
+- **`--zdr`** makes Claude's built-in web tools eligible for Anthropic's Zero Data Retention
+  (ZDR). It sets `allowed_callers: ["direct"]`, which also turns off "dynamic filtering"
+  (Claude trimming search results before they fill its context). It's opt-in for that reason.
+- The LangGraph engine wasn't saving log details (which task an entry belongs to). Now it
+  matches the loop engine.
+
+## Step 16: Memory that makes research better → [`continuity.py`](../rootlogic/continuity.py)
 
 Two features let rootlogic use the user's own input across sessions:
 
@@ -249,7 +299,17 @@ Two features let rootlogic use the user's own input across sessions:
 - **Follow-up threads.** `load_previous` rebuilds a finished session's findings, sources and
   user answers. A new session is linked to it by `parent_id` and starts with those findings as
   already-done `previous` tasks. The planner sees which questions are already answered and plans
-  only new ones, and already-seen URLs count as duplicates.
+  only new ones, and already-seen URLs count as duplicates. Earlier tasks don't count against
+  the task budget, and log lines say "3 new sub-tasks (+3 from earlier research)".
+
+Where the user's own words go:
+
+| Input | Used in |
+|---|---|
+| Answers and notes, this session | Every later prompt in the session |
+| The learned profile | Every prompt of every later session |
+| An earlier session you follow up on | Its findings, sources and your answers, carried into the new session |
+| Past sessions in general | Their topics and summaries, shown to the clarifier and planner |
 
 Design choices worth explaining:
 - Learning is **best-effort**: if the profile call fails, the finished research still succeeds.
@@ -257,30 +317,35 @@ Design choices worth explaining:
   auto-approved runs.
 - Remembered text is treated as **data, not instructions**, like web content.
 
-## Step 16: Check it, then publish
+## Step 17: Check it, then publish
 
-The build was checked in this order:
+Every change went through the same routine:
 
-1. Ran the tests.
-2. Ran the offline demo. It caught one bug: Rich treated `[t1]` as a formatting tag and hid it.
-3. Initialized git and committed.
-4. Created the GitHub repo and pushed.
+1. Wrote or updated tests, then ran them.
+2. Ran the offline demo, and for UI work, used it in a real browser. The first demo caught
+   Rich hiding `[t1]` as a formatting tag. The browser caught the duplicate task ids and the
+   orphaned "running" sessions.
+3. Checked external facts (API shapes, pricing, protocol versions) against official docs.
+4. Committed with a message explaining *why*, and pushed to GitHub.
 
 ---
 
 ## What to do next
 
 1. **Get an API key** at console.anthropic.com. Run `export ANTHROPIC_API_KEY=...`, then
-   `rootlogic research "a topic you know well"`. The live Claude path has not been exercised
-   yet, so the first run may surface small API-shape fixes.
+   `rootlogic research "a topic you know well"`. The live Claude and Tavily paths haven't been
+   run yet, so the first real run may surface small fixes.
 2. **Read the code in this order:** `models.py` → `orchestrator.py` (start with `run()`) →
-   `llm.py` → `filters.py` → `context.py` → the tests → `graph.py`.
+   `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → the tests →
+   `graph.py` → `web.py`.
 3. **Rehearse the demo:**
    - A vague topic (shows clarifying questions).
    - Editing the plan.
    - Ctrl-C with an `add` or `note` override.
    - `rootlogic usage <id>` for cost.
    - A second related topic (shows memory).
+   - Answer a clarifying question, then run another topic: the profile is used and not re-asked.
+   - `--follow-up <id>` (or "Continue this research"): only the new questions get researched.
    - `--engine graph`: kill it mid-run, then `rootlogic resume <id>`.
    - `rootlogic web`: the same flow in the browser, including refresh mid-run.
 4. **Be ready to explain:**
@@ -290,7 +355,14 @@ The build was checked in this order:
    - Why budgets exist.
    - Why the source rules live in code.
    - What LangGraph added and what it cost.
+   - Why search sits behind its own interface, and what that means for swapping models.
+   - How the profile and follow-ups make research improve over time, and how the user
+     controls them.
 
-For the wider context (prior art, framework trade-offs, storage options, research protocols,
-UX patterns, search tools), read the research brief:
-[research/agentic-research-assistant.md](research/agentic-research-assistant.md).
+For wider context, read the two research notes:
+
+- [research/agentic-research-assistant.md](research/agentic-research-assistant.md): prior art,
+  framework trade-offs, storage options, research protocols, UX patterns and search tools.
+- [research/models-tools-protocols.md](research/models-tools-protocols.md): which LLM APIs we
+  use, how to swap models, what subagent tools do, what's stored, and how agents communicate
+  (MCP, A2A).
