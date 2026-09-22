@@ -23,6 +23,7 @@ from .control import Command, Event
 from .models import Plan, SubTaskDraft
 from .orchestrator import Budget, Orchestrator
 from .store import Store
+from .backend import Backend, BackendError, parse_prices
 
 console = Console()
 HOME = Path(os.environ.get("ROOTLOGIC_HOME", ".rootlogic"))
@@ -129,8 +130,8 @@ def show_plan(plan: Plan) -> None:
 
 
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
-                  budget: Budget | None = None, home: Path = HOME, zdr: bool = False,
-                  search: str = "anthropic", use_profile: bool = True):
+                  budget: Budget | None = None, home: Path = HOME,
+                  backend: Backend | None = None, use_profile: bool = True):
     """Construct an engine with usage accounting wired to the store.
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
@@ -148,9 +149,7 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
         from .fake_llm import FakeLLM
         llm = FakeLLM(usage_sink)
     else:
-        from .llm import AnthropicLLM
-        from .search import get_search_provider
-        llm = AnthropicLLM(usage_sink, zdr=zdr, search=get_search_provider(search))
+        llm = (backend or Backend()).make_llm(usage_sink)
 
     if engine == "graph":
         from .graph import ResearchGraph
@@ -168,10 +167,11 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
                     verbose=getattr(args, "verbose", False))
     budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
                     max_parallel=args.parallel, max_searches=args.searches)
+    backend = backend_from_args(args).validate()
     eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget,
-                        zdr=getattr(args, "zdr", False),
-                        search=getattr(args, "search", "anthropic"),
-                        use_profile=not getattr(args, "no_profile", False))
+                        backend=backend, use_profile=not getattr(args, "no_profile", False))
+    if not args.offline:
+        console.print(f"[dim]Model: {backend.label}[/]")
     install_pause_handler(eng, ui)
     return eng
 
@@ -234,7 +234,9 @@ def cmd_web(args: argparse.Namespace, store: Store) -> int:
         console.print("[yellow]Warning: the web UI has no authentication and spends your API "
                       "credits. Only expose it on a network you trust.[/]")
     console.print(f"rootlogic web UI → http://{args.host}:{args.port}  (Ctrl-C to stop)")
-    serve(args.db, HOME, host=args.host, port=args.port, zdr=args.zdr, search=args.search)
+    backend = backend_from_args(args).validate()
+    console.print(f"[dim]Model: {backend.label}[/]")
+    serve(args.db, HOME, host=args.host, port=args.port, backend=backend)
     return 0
 
 
@@ -333,10 +335,31 @@ def cmd_forget(args, store: Store) -> int:
     return 0
 
 
-SEARCH_ARG = (("--search",), dict(
-    choices=["anthropic", "tavily"], default="anthropic",
-    help="web search backend for sub-agents: Claude's built-in tools, or Tavily via our own "
-         "SearchProvider tools (needs TAVILY_API_KEY)"))
+def add_backend_args(p: argparse.ArgumentParser) -> None:
+    """Model + search flags, shared by research, resume and web."""
+    g = p.add_argument_group("model and search")
+    g.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic",
+                   help="anthropic (Claude) or openai: any OpenAI-compatible server "
+                        "(OpenAI, Ollama, LM Studio, vLLM, OpenRouter)")
+    g.add_argument("--model", help="model id; default claude-opus-5, required for openai")
+    g.add_argument("--base-url", help="OpenAI-compatible server, e.g. http://localhost:11434/v1")
+    g.add_argument("--no-strict", action="store_true",
+                   help="openai provider: for servers without strict JSON-schema support")
+    g.add_argument("--prices", metavar="IN,OUT",
+                   help="openai provider: USD per million input,output tokens for cost tracking")
+    g.add_argument("--search", choices=["anthropic", "tavily"], default="anthropic",
+                   help="web search for sub-agents: Claude's built-in tools, or Tavily via our "
+                        "own SearchProvider tools (needs TAVILY_API_KEY)")
+    g.add_argument("--zdr", action="store_true",
+                   help="Zero Data Retention: Claude web tools without dynamic filtering")
+
+
+def backend_from_args(args: argparse.Namespace) -> Backend:
+    return Backend(provider=getattr(args, "provider", "anthropic"),
+                   model=getattr(args, "model", None), base_url=getattr(args, "base_url", None),
+                   search=getattr(args, "search", "anthropic"), zdr=getattr(args, "zdr", False),
+                   strict=not getattr(args, "no_strict", False),
+                   prices=parse_prices(getattr(args, "prices", None)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -357,9 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-tasks", type=int, default=10)
     r.add_argument("--parallel", type=int, default=4)
     r.add_argument("--searches", type=int, default=5, help="web searches per sub-agent")
-    r.add_argument("--zdr", action="store_true",
-                   help="Zero Data Retention: web tools without dynamic filtering")
-    r.add_argument(*SEARCH_ARG[0], **SEARCH_ARG[1])
+    add_backend_args(r)
     r.add_argument("--engine", choices=["loop", "graph"], default="loop",
                    help="loop: hand-rolled orchestrator · graph: LangGraph (resumable)")
     r.set_defaults(fn=cmd_research)
@@ -367,17 +388,13 @@ def main(argv: list[str] | None = None) -> int:
     rs = sub.add_parser("resume", help="continue a --engine graph session from its checkpoint")
     rs.add_argument("session")
     rs.add_argument("--offline", action="store_true")
-    rs.add_argument(*SEARCH_ARG[0], **SEARCH_ARG[1])
-    rs.add_argument("--zdr", action="store_true",
-                    help="Zero Data Retention: web tools without dynamic filtering")
+    add_backend_args(rs)
     rs.set_defaults(fn=cmd_resume, rounds=2, max_tasks=10, parallel=4, searches=5)
 
     w = sub.add_parser("web", help="start the web UI (FastAPI + SSE)")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", type=int, default=8000)
-    w.add_argument(*SEARCH_ARG[0], **SEARCH_ARG[1])
-    w.add_argument("--zdr", action="store_true",
-                   help="Zero Data Retention: web tools without dynamic filtering")
+    add_backend_args(w)
     w.set_defaults(fn=cmd_web)
 
     gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")
@@ -412,6 +429,9 @@ def main(argv: list[str] | None = None) -> int:
         return args.fn(args, Store(args.db))
     except SearchError as e:
         console.print(f"[red]Search provider error:[/] {e}")
+        return 2
+    except BackendError as e:
+        console.print(f"[red]Invalid model settings:[/] {e}")
         return 2
 
 

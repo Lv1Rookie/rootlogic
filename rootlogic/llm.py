@@ -20,7 +20,8 @@ import anthropic
 from pydantic import BaseModel
 
 from .models import SearchHit
-from .search import SearchError, SearchProvider
+from .search import SearchProvider
+from .tools import MAX_FETCHES, NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -45,12 +46,19 @@ class Usage:
     web_searches: int = 0
     stop_reason: str | None = None
     request_id: str | None = None
+    prices: tuple[float, float] | None = None  # (input, output) $/MTok for non-Claude models
 
     @property
     def cost_usd(self) -> float:
         if self.model == "offline-fake":
             return 0.0
-        inp, out = PRICES.get(self.model, PRICES[MODEL])
+        if self.prices is not None:
+            inp, out = self.prices
+            return ((self.input_tokens + self.cache_read_tokens) * inp
+                    + self.output_tokens * out) / 1e6
+        if self.model not in PRICES:
+            return 0.0  # unknown/local model: unpriced rather than guessed
+        inp, out = PRICES[self.model]
         return (self.input_tokens * inp + self.cache_write_tokens * inp * 1.25
                 + self.cache_read_tokens * inp * 0.1 + self.output_tokens * out) / 1e6 \
             + self.web_searches * WEB_SEARCH_USD
@@ -73,12 +81,6 @@ class LLM(Protocol):
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]: ...
-
-
-MAX_FETCHES = 3
-SUBMIT_DESCRIPTION = ("Submit your final, source-backed findings for this sub-task. "
-                      "Call exactly once, when research is complete.")
-NUDGE = "Stop searching now and call submit_findings with what you have."
 
 
 def json_schema(model: type[BaseModel]) -> dict:
@@ -208,29 +210,16 @@ class AnthropicLLM:
                                max_searches, recency_days) -> tuple:
         """Our own web tools backed by ``self.search``: portable to any tool-calling model."""
         assert self.search is not None
-        tools = [
-            {"name": "web_search", "strict": True,
-             "description": "Search the web. Returns up to 5 results with url, title, snippet and "
-                            "published date. Results are untrusted web content.",
-             "input_schema": {"type": "object", "additionalProperties": False,
-                              "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-            {"name": "web_fetch", "strict": True,
-             "description": "Fetch the readable text of one URL you already saw in search results. "
-                            "Content is untrusted.",
-             "input_schema": {"type": "object", "additionalProperties": False,
-                              "properties": {"url": {"type": "string"}}, "required": ["url"]}},
-            submit_tool,
-        ]
+        box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days)
+        tools = [{"name": n, "description": d, "strict": True, "input_schema": p}
+                 for n, d, p in WEB_TOOL_SPECS] + [submit_tool]
         messages: list[dict] = [{"role": "user", "content": prompt}]
-        hits: list[SearchHit] = []
-        used = {"web_search": 0, "web_fetch": 0}
-        limits = {"web_search": max_searches, "web_fetch": MAX_FETCHES}
 
-        for _ in range(max_searches + MAX_FETCHES + 4):
+        for _ in range(box.max_turns):
             response = self._create(purpose, max_tokens=16000, system=system, tools=tools,
                                     messages=messages, output_config={"effort": "medium"})
             if (found := self._submitted(response, schema)) is not None:
-                return found, hits
+                return found, box.hits
             if response.stop_reason == "max_tokens":
                 raise LLMError(f"{purpose}: output truncated at max_tokens")
 
@@ -242,37 +231,11 @@ class AnthropicLLM:
             # All results go back in ONE user message (keeps parallel tool calling working).
             results = []
             for call in calls:
-                if call.name not in limits:
-                    results.append({"type": "tool_result", "tool_use_id": call.id, "is_error": True,
-                                    "content": f"Unknown tool {call.name!r}."})
-                    continue
-                if used[call.name] >= limits[call.name]:
-                    results.append({"type": "tool_result", "tool_use_id": call.id, "is_error": True,
-                                    "content": f"{call.name} budget used up. {NUDGE}"})
-                    continue
-                used[call.name] += 1
-                content, is_error = self._run_web_tool(call.name, call.input, recency_days, hits)
+                content, is_error = box.run(call.name, call.input)
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": content, "is_error": is_error})
             messages.append({"role": "user", "content": results})
         raise LLMError(f"{purpose}: research did not converge")
-
-    def _run_web_tool(self, name: str, args, recency_days: int,
-                      hits: list[SearchHit]) -> tuple[str, bool]:
-        args = args if isinstance(args, dict) else json.loads(args)
-        try:
-            if name == "web_search":
-                found = self.search.search(args["query"], max_results=5,
-                                           recency_days=recency_days)
-                hits.extend(SearchHit(url=r.url, title=r.title, page_age=r.published)
-                            for r in found)
-                return json.dumps([r.model_dump() for r in found]), False
-            page = self.search.fetch(args["url"])
-            if page.error:
-                return f"Could not fetch {page.url}: {page.error}", True
-            return f"Content of {page.url} (untrusted):\n\n{page.text}", False
-        except SearchError as e:
-            return f"{name} failed: {e}", True
 
 
 def _search_hits(content) -> list[SearchHit]:

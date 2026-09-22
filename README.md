@@ -45,7 +45,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 79 tests, no network
+pytest                       # 100 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -114,6 +114,9 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `graph.py` | The same agent as a LangGraph state machine (checkpoints, `interrupt()`, resume). |
 | `context.py` | Pure prompt builders and source curation shared by both engines. |
 | `continuity.py` | Cross-session continuity: learns your standing preferences, and rebuilds an earlier session so a follow-up can continue it. |
+| `openai_llm.py` | `OpenAICompatibleLLM`: the same `LLM` interface over Chat Completions (OpenAI, Ollama, vLLM, OpenRouter …). |
+| `backend.py` | Which model and search a run uses; validates combinations up front. |
+| `tools.py` | Our client-side `web_search`/`web_fetch` tools and their budgets, shared by both adapters. |
 | `search.py` | `SearchProvider` protocol (`search`, `fetch`) + `TavilySearch`, `StaticSearch`. The model-agnostic path for web access. |
 | `fake_llm.py` | Deterministic LLM for tests and `--offline` demos. |
 
@@ -161,6 +164,32 @@ New to agents? Start with [docs/walkthrough.md](docs/walkthrough.md), a step-by-
 of how this project was built. See [docs/research/agentic-research-assistant.md](docs/research/agentic-research-assistant.md)
 for the research behind these choices (frameworks, storage options, protocols, UX, tools) and an
 alternative architecture (LangGraph + web UI).
+
+## Other models (OpenAI-compatible)
+
+rootlogic runs on Claude by default. `--provider openai` swaps in any server that speaks the
+OpenAI Chat Completions format: OpenAI itself, local models via Ollama / LM Studio / vLLM, or
+OpenRouter. The rest of rootlogic doesn't change, because both adapters implement the same
+two-method `LLM` interface.
+
+```bash
+pip install -e '.[openai]'
+export TAVILY_API_KEY=tvly-...        # other models use our own search tools
+rootlogic research --provider openai --model gpt-5-mini --search tavily --prices 0.25,2 "topic"
+rootlogic research --provider openai --base-url http://localhost:11434/v1 --model llama3.3 \
+                   --search tavily "topic"        # local via Ollama: no LLM bill
+```
+
+- `--search tavily` is required: Claude's built-in web tools only work with Claude.
+- `--no-strict` is for servers without strict JSON-schema support. The adapter then asks for JSON
+  in the prompt, validates it, and lets the model correct itself once.
+- `--prices IN,OUT` (USD per million tokens) enables cost tracking. Without it, non-Claude calls
+  record $0.
+- Claude-only features don't apply: `--zdr`, effort levels, and server-side refusal fallback.
+  Refusals and content filtering from the other provider are still detected and reported.
+- Invalid combinations are rejected before anything runs (`rootlogic/backend.py`).
+- Smaller local models are noticeably weaker at planning, strict schemas and faithful citation.
+  Consider a larger model when quality matters.
 
 ## Memory that improves research
 

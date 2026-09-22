@@ -73,6 +73,7 @@ Added later, each for a specific reason:
 | **LangGraph** | A second engine with checkpointing and resume | 13 |
 | **FastAPI** | A web UI that streams progress to the browser | 14 |
 | **Tavily** (optional) | Web search that doesn't depend on one LLM vendor | 15 |
+| **OpenAI SDK** (optional) | Run on GPT, local models (Ollama) or OpenRouter | 17 |
 
 ## Step 4: Define the data shapes first → [`models.py`](../rootlogic/models.py)
 
@@ -107,7 +108,7 @@ This file also:
 
 **Why wrap it:** this boundary is what makes a `FakeLLM` for tests possible. It also means
 switching to another provider later only touches one file. Step 15 finishes that job for web
-search, which was the one part still tied to Claude.
+search, which was the one part still tied to Claude, and Step 17 adds the second adapter.
 
 ## Step 6: Write the orchestrator → [`orchestrator.py`](../rootlogic/orchestrator.py)
 
@@ -198,11 +199,13 @@ check that:
 - The LangGraph engine resumes after a crash, and saves the same log details as the loop engine.
 - The web API round-trips questions, plan edits and overrides, and replays SSE.
 - The search tools enforce their limits, and Tavily requests and responses map correctly.
+- The OpenAI-compatible adapter sends the right wire format and handles refusals, truncation,
+  invalid JSON and the repair retry, tested against the `openai` SDK's own response types.
 - The profile is learned, used, edited and can be switched off.
 - Follow-ups reuse earlier findings, chain, and don't count earlier tasks against the budget.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 81 tests run in a few seconds with no internet.
+is added first. All 100 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -223,6 +226,7 @@ and `profile`. Useful flags on `research`:
 | `--search tavily` | Uses our own search tools instead of Claude's (Step 15) |
 | `--zdr` | Zero Data Retention mode for Claude's web tools (Step 15) |
 | `--no-profile` | Doesn't use or update the learned profile for this run (Step 16) |
+| `--provider openai --model … [--base-url …]` | Runs on another model (Step 17) |
 
 ## Step 13: A second engine with LangGraph → [`graph.py`](../rootlogic/graph.py)
 
@@ -317,7 +321,31 @@ Design choices worth explaining:
   auto-approved runs.
 - Remembered text is treated as **data, not instructions**, like web content.
 
-## Step 17: Check it, then publish
+## Step 17: A second model adapter → [`openai_llm.py`](../rootlogic/openai_llm.py)
+
+"OpenAI-compatible" means the Chat Completions request format (`POST /v1/chat/completions`),
+which many services accept: OpenAI, local servers like Ollama, and routers like OpenRouter.
+`OpenAICompatibleLLM` implements the same two methods as `AnthropicLLM`, so nothing else in
+rootlogic changes when you pass `--provider openai`.
+
+- **`structured()`** sends our Pydantic schema as a strict `json_schema` response format. For
+  servers without that (`--no-strict`), it asks for JSON in the prompt, validates it, and shows
+  the model its mistake once before giving up.
+- **`research()`** runs the same client-side tool loop as `--search tavily`. The tool code and
+  its limits live in [`tools.py`](../rootlogic/tools.py), so both adapters behave identically.
+  Invalid findings are sent back for correction, and every tool call gets a reply, even failed ones.
+- **Refusals** (`refusal` field or `content_filter`) and **truncation** (`length`) raise the same
+  errors as with Claude, so the engines handle them the same way.
+- **Cost:** token usage is recorded for every call. Prices come from `--prices`, because an
+  unknown model is recorded at $0 rather than guessed. Building this also exposed an old bug:
+  unknown models used to be priced as Claude Opus.
+- **[`backend.py`](../rootlogic/backend.py)** gathers the model and search settings in one place
+  and rejects bad combinations up front, e.g. `--provider openai` without `--search tavily`.
+
+The adapter was written against the installed `openai` SDK's actual types, not from memory. Its
+tests replay real SDK response objects, so no network is needed.
+
+## Step 18: Check it, then publish
 
 Every change went through the same routine:
 
@@ -334,10 +362,11 @@ Every change went through the same routine:
 
 1. **Get an API key** at console.anthropic.com. Run `export ANTHROPIC_API_KEY=...`, then
    `rootlogic research "a topic you know well"`. The live Claude and Tavily paths haven't been
-   run yet, so the first real run may surface small fixes.
+   run yet, so the first real run may surface small fixes. The same goes for the
+   OpenAI-compatible adapter. Trying it free with Ollama is a good first test.
 2. **Read the code in this order:** `models.py` → `orchestrator.py` (start with `run()`) →
-   `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → the tests →
-   `graph.py` → `web.py`.
+   `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → `tools.py` →
+   `openai_llm.py` → the tests → `graph.py` → `web.py`.
 3. **Rehearse the demo:**
    - A vague topic (shows clarifying questions).
    - Editing the plan.

@@ -360,7 +360,8 @@ Our code already has the right pieces for this: typed schemas at the boundary, a
 - **`OpenAICompatLLM` adapter** (one class: OpenAI, Ollama `/v1`, vLLM, OpenRouter) implementing `structured` via `response_format` and `research` via our own tool loop (§2.4e).
 - **Price table in config plus `provider` column** in `llm_calls`, so costs stay right across providers (§2.5).
 - **`transcripts` table** (verbatim request/response blocks per call) behind a `TranscriptSink`, with a retention setting (§4.4).
-- ~~`SearchProvider` protocol~~: done (`rootlogic/search.py`, `--search tavily`). Next: an OpenAI-compatible `LLM` adapter that uses it.
+- ~~`SearchProvider` protocol~~: done (`rootlogic/search.py`, `--search tavily`).
+- ~~OpenAI-compatible `LLM` adapter~~: done (`rootlogic/openai_llm.py`, `--provider openai`).
 - **Store raw `SearchHit`s and dropped-source titles** to measure search quality (§4.3).
 - **`subagent.tool_call` events** via an `on_step` callback, so the action log shows each query and fetch (§6.3).
 - **Pin tool versions deliberately:** consider `web_search_20260318` with `response_inclusion`, or `allowed_callers: ["direct"]` where ZDR matters (§3.1).

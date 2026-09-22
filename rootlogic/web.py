@@ -29,6 +29,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .backend import Backend, BackendError
 from .control import Command, Event
 from .models import Plan, SubTaskDraft
 from .orchestrator import Budget
@@ -177,8 +178,8 @@ class ResumeRun(BaseModel):
 # =================================================================== app
 
 
-def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = False,
-               search: str = "anthropic") -> FastAPI:
+def create_app(store: Store, home: Path, *, engine_factory=None,
+               backend: Backend | None = None) -> FastAPI:
     """``engine_factory(store, ui, engine=, offline=, budget=, home=)`` is injectable for tests."""
     if engine_factory is None:
         from .cli import create_engine as engine_factory
@@ -199,11 +200,11 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
         from .search import SearchError
         try:
             run.engine = engine_factory(store, WebInteraction(run), engine=run.engine_name,
-                                        offline=run.offline, budget=budget, home=home, zdr=zdr,
-                                        search=search, use_profile=use_profile)
-        except SearchError as e:
+                                        offline=run.offline, budget=budget, home=home,
+                                        backend=backend, use_profile=use_profile)
+        except (SearchError, BackendError) as e:
             runs.pop(run.id, None)
-            raise HTTPException(400, f"Search provider error: {e}") from e
+            raise HTTPException(400, f"Model/search settings: {e}") from e
 
         def work():
             try:
@@ -359,8 +360,8 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
 
 
 def serve(db: str, home: Path, host: str = "127.0.0.1", port: int = 8000,
-          zdr: bool = False, search: str = "anthropic") -> None:
+          backend: Backend | None = None) -> None:
     import uvicorn
 
-    uvicorn.run(create_app(Store(db), home, zdr=zdr, search=search), host=host, port=port,
+    uvicorn.run(create_app(Store(db), home, backend=backend), host=host, port=port,
                 log_level="warning")
