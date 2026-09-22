@@ -54,3 +54,11 @@ class Control:
             self._pause.clear()
             return True
         return False
+
+    # LangGraph re-runs an interrupted node from its start on resume, so the graph engine
+    # peeks at the flag and clears it only after the override interrupt has been answered.
+    def pause_pending(self) -> bool:
+        return self._pause.is_set()
+
+    def clear(self) -> None:
+        self._pause.clear()

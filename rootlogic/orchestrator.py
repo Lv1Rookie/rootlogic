@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from . import context as ctx
 from . import prompts
 from .control import Command, Control, Event, Interaction
-from .filters import fill_dates_from_hits, filter_sources, normalize_url
 from .llm import LLM, AgentRefusal, LLMError
-from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft,
-                     Reflection, Report, ReportDraft, SourceDraft, SubTask, SubTaskDraft)
+from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
+                     Report, ReportDraft, SubTask, SubTaskDraft)
 from .store import Store
 
 
@@ -155,26 +155,17 @@ class Orchestrator:
 
     def _research_task(self, plan: Plan, task: SubTask) -> tuple[FindingDraft, list]:
         """Runs in a worker thread: only calls the LLM, never the UI or shared state."""
-        prompt = (
-            f"Overall objective: {plan.objective}\n"
-            f"Today's date: {self.today.isoformat()}\n"
-            f"Recency requirement: {self._recency_text(plan)}\n"
-            f"{self._context_block()}"
-            f"Sub-task question: {task.question}\n"
-            f"Why it matters: {task.rationale}\n"
-            f"Starting queries: {'; '.join(task.search_queries)}\n"
-            f"{self._dependency_block(plan, task)}"
-        )
+        deps = [self.findings[d] for d in task.depends_on if d in self.findings]
+        prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
         return self.llm.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
                                  prompt=prompt, schema=FindingDraft,
                                  max_searches=self.budget.max_searches)
 
     def _accept_finding(self, plan: Plan, task: SubTask, result: tuple[FindingDraft, list]) -> None:
         draft, hits = result
-        fill_dates_from_hits(draft.sources, hits)
-        kept, dropped = filter_sources(draft.sources, recency_days=plan.recency_days,
-                                       today=self.today, seen_urls=self.seen_urls,
-                                       blocked_domains=self.blocked_domains)
+        finding = ctx.curate(task, draft, hits, recency_days=plan.recency_days, today=self.today,
+                             seen_urls=self.seen_urls, blocked_domains=self.blocked_domains)
+        kept, dropped = finding.sources, finding.dropped
         for url, reason in dropped:
             self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
             self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}", task=task.id)
@@ -182,9 +173,6 @@ class Orchestrator:
             self.store.add_source(self.sid, task.id, s.url, title=s.title, published=s.published,
                                   credibility=s.credibility.level, kept=True,
                                   data=s.model_dump_json())
-        finding = Finding(task_id=task.id, question=task.question, answer=draft.answer,
-                          sources=kept, claims=draft.claims, gaps=draft.gaps,
-                          confidence=draft.confidence, dropped=dropped)
         self.findings[task.id] = finding
         task.status = "done"
         self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin,
@@ -306,62 +294,16 @@ class Orchestrator:
 
     # ================================================================== prompt blocks
     def _topic_block(self, topic: str, memory: list[dict]) -> str:
-        parts = [f"Topic: {topic}", f"Today's date: {self.today.isoformat()}"]
-        if memory:
-            parts.append("Prior research by this user:\n" + "\n".join(
-                f"- {m['topic']} ({m['created_at'][:10]}): {m['summary']}" for m in memory))
-        if self.context:
-            parts.append(self._context_block())
-        return "\n\n".join(parts)
-
-    def _context_block(self) -> str:
-        return ("User clarifications and guidance:\n" + "\n".join(self.context) + "\n") \
-            if self.context else ""
-
-    def _recency_text(self, plan: Plan) -> str:
-        return f"prefer sources from the last {plan.recency_days} days" if plan.recency_days \
-            else "age does not matter"
-
-    def _dependency_block(self, plan: Plan, task: SubTask) -> str:
-        deps = [self.findings[d] for d in task.depends_on if d in self.findings]
-        return "".join(f"\nEarlier finding ({f.question}): {f.answer}\n" for f in deps)
+        return ctx.topic_block(topic, self.today, memory, self.context)
 
     def _progress_block(self, plan: Plan) -> str:
-        lines = [f"Objective: {plan.objective}", self._context_block(), "Plan status:"]
-        lines += [f"- [{t.id}] ({t.status}) {t.question}" for t in plan.subtasks]
-        lines.append("\nFindings so far:")
-        for f in self.findings.values():
-            lines.append(f"\n[{f.task_id}] {f.question}\nConfidence: {f.confidence}; "
-                         f"{len(f.sources)} sources\n{f.answer}\nGaps: {'; '.join(f.gaps) or 'none'}")
-        return "\n".join(lines)
-
-    def _all_sources(self) -> list[SourceDraft]:
-        out, seen = [], set()
-        for f in self.findings.values():
-            for s in f.sources:
-                if (k := normalize_url(s.url)) not in seen:
-                    seen.add(k)
-                    out.append(s)
-        return out
+        return ctx.progress_block(plan, list(self.findings.values()), self.context)
 
     def _findings_block(self, plan: Plan) -> str:
-        sources = self._all_sources()
-        index = {normalize_url(s.url): i for i, s in enumerate(sources, start=1)}
-        lines = [f"Topic: {plan.topic}", f"Objective: {plan.objective}", self._context_block(),
-                 "Sources:"]
-        for i, s in enumerate(sources, start=1):
-            lines.append(f"[{i}] {s.title} — {s.publisher}, {s.published}, credibility "
-                         f"{s.credibility.level}: {s.summary}")
-        lines.append("\nFindings:")
-        for f in self.findings.values():
-            lines.append(f"\n## {f.question} (confidence {f.confidence})\n{f.answer}")
-            for c in f.claims:
-                refs = sorted({index[k] for u in c.source_urls if (k := normalize_url(u)) in index})
-                if refs:
-                    lines.append(f"- {c.text} " + "".join(f"[{r}]" for r in refs))
-            if f.gaps:
-                lines.append("Gaps: " + "; ".join(f.gaps))
-        return "\n".join(lines)
+        return ctx.findings_block(plan, list(self.findings.values()), self.context)
+
+    def _all_sources(self):
+        return ctx.all_sources(list(self.findings.values()))
 
     # ================================================================== bookkeeping
     def _emit(self, type_: str, message: str, **data) -> None:

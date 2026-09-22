@@ -34,12 +34,15 @@ rootlogic research --offline -y "any topic"      # no API key needed: determinis
 export ANTHROPIC_API_KEY=sk-ant-...              # or `ant auth login`
 rootlogic research "your topic"                  # live: Claude + web search
 
+rootlogic research --engine graph "topic"       # LangGraph engine (resumable)
+rootlogic resume <session>   # continue a graph session after a crash / quit
+rootlogic graph              # print the LangGraph engine as a Mermaid diagram
 rootlogic history            # past sessions + suggested next topics (long-term memory)
 rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 26 tests, no network
+pytest                       # 37 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -139,6 +142,13 @@ SQLite single file (`.rootlogic/rootlogic.db`), all rows keyed by `session_id`:
 See [docs/research/agentic-research-assistant.md](docs/research/agentic-research-assistant.md)
 for the research behind these choices (frameworks, storage options, protocols, UX, tools) and an
 alternative architecture (LangGraph + web UI).
+
+## Two engines
+
+The same agent is implemented twice: a hand-rolled orchestrator loop (default) and a
+LangGraph state machine (`--engine graph`) with checkpointing, `interrupt()`-based human
+approval and `rootlogic resume`. Both share prompts, schemas, filters, storage and UI.
+See [docs/langgraph-vs-loop.md](docs/langgraph-vs-loop.md) for a side-by-side comparison.
 
 ## Roadmap
 

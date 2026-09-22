@@ -128,12 +128,15 @@ def show_plan(plan: Plan) -> None:
 # =================================================================== commands
 
 
-def cmd_research(args: argparse.Namespace, store: Store) -> int:
-    ui = TerminalUI(auto_approve=args.yes, verbose=args.verbose)
+def build_engine(args: argparse.Namespace, store: Store, engine: str):
+    """Construct the chosen engine. Both expose .run(topic), .control and .sid."""
+    ui = TerminalUI(auto_approve=getattr(args, "yes", False),
+                    verbose=getattr(args, "verbose", False))
     budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
                     max_parallel=args.parallel, max_searches=args.searches)
+    holder: dict = {}
     usage_sink = lambda u: store.record_call(  # noqa: E731
-        session_id=orch.sid or None, purpose=u.purpose, model=u.model,
+        session_id=holder["e"].sid or None, purpose=u.purpose, model=u.model,
         input_tokens=u.input_tokens, output_tokens=u.output_tokens,
         cache_read_tokens=u.cache_read_tokens, cache_write_tokens=u.cache_write_tokens,
         web_searches=u.web_searches, cost_usd=u.cost_usd, stop_reason=u.stop_reason,
@@ -146,8 +149,19 @@ def cmd_research(args: argparse.Namespace, store: Store) -> int:
         from .llm import AnthropicLLM
         llm = AnthropicLLM(usage_sink)
 
-    orch = Orchestrator(llm, store, ui, budget=budget, reports_dir=HOME / "reports")
+    if engine == "graph":
+        from .graph import ResearchGraph
+        eng = ResearchGraph(llm, store, ui, checkpoint_path=HOME / "checkpoints.db",
+                            budget=budget, reports_dir=HOME / "reports")
+    else:
+        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=HOME / "reports")
+    holder["e"] = eng
+    install_pause_handler(eng, ui)
+    return eng
 
+
+def install_pause_handler(engine, ui: TerminalUI) -> None:
+    """First Ctrl-C requests a pause at the next checkpoint; a second one exits."""
     presses = {"n": 0}
 
     def on_sigint(signum, frame):
@@ -157,7 +171,7 @@ def cmd_research(args: argparse.Namespace, store: Store) -> int:
             os._exit(130)
         console.print("\n[yellow]Pause requested — will stop at the next checkpoint "
                       "(Ctrl-C again to quit).[/]")
-        orch.control.request_pause()
+        engine.control.request_pause()
 
     signal.signal(signal.SIGINT, on_sigint)
     original_override = ui.override
@@ -168,11 +182,34 @@ def cmd_research(args: argparse.Namespace, store: Store) -> int:
 
     ui.override = override_and_reset  # type: ignore[method-assign]
 
-    topic = " ".join(args.topic) or Prompt.ask("[bold]What should I research?[/]")
-    report = orch.run(topic)
+
+def print_report(report) -> int:
     if report:
         console.print(Panel(Markdown(report.to_markdown()), title="Report", border_style="green"))
     return 0 if report else 1
+
+
+def cmd_research(args: argparse.Namespace, store: Store) -> int:
+    engine = build_engine(args, store, args.engine)
+    topic = " ".join(args.topic) or Prompt.ask("[bold]What should I research?[/]")
+    return print_report(engine.run(topic))
+
+
+def cmd_resume(args: argparse.Namespace, store: Store) -> int:
+    engine = build_engine(args, store, "graph")
+    try:
+        return print_report(engine.resume(args.session))
+    except ValueError as e:
+        console.print(f"[red]{e}[/] (only sessions started with --engine graph can resume)")
+        return 1
+
+
+def cmd_graph(args: argparse.Namespace, store: Store) -> int:
+    from .graph import ResearchGraph
+    from .fake_llm import FakeLLM
+    g = ResearchGraph(FakeLLM(), store, TerminalUI(), checkpoint_path=":memory:")
+    console.print(g.mermaid(), highlight=False, markup=False)
+    return 0
 
 
 def cmd_history(args, store: Store) -> int:
@@ -244,7 +281,17 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-tasks", type=int, default=10)
     r.add_argument("--parallel", type=int, default=4)
     r.add_argument("--searches", type=int, default=5, help="web searches per sub-agent")
+    r.add_argument("--engine", choices=["loop", "graph"], default="loop",
+                   help="loop: hand-rolled orchestrator · graph: LangGraph (resumable)")
     r.set_defaults(fn=cmd_research)
+
+    rs = sub.add_parser("resume", help="continue a --engine graph session from its checkpoint")
+    rs.add_argument("session")
+    rs.add_argument("--offline", action="store_true")
+    rs.set_defaults(fn=cmd_resume, rounds=2, max_tasks=10, parallel=4, searches=5)
+
+    gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")
+    gr.set_defaults(fn=cmd_graph)
 
     h = sub.add_parser("history", help="list past sessions and suggested topics")
     h.add_argument("--limit", type=int, default=20)
