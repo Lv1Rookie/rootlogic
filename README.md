@@ -139,7 +139,8 @@ SQLite single file (`.rootlogic/rootlogic.db`), all rows keyed by `session_id`:
 | `llm_calls` | per-request tokens (input/output/cache read/cache write), web searches, cost, request id |
 | `memory_fts` | FTS5 index of past session topics/summaries/takeaways for recall |
 
-See [docs/research/agentic-research-assistant.md](docs/research/agentic-research-assistant.md)
+New to agents? Start with [docs/walkthrough.md](docs/walkthrough.md), a step-by-step account
+of how this project was built. See [docs/research/agentic-research-assistant.md](docs/research/agentic-research-assistant.md)
 for the research behind these choices (frameworks, storage options, protocols, UX, tools) and an
 alternative architecture (LangGraph + web UI).
 
