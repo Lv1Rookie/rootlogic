@@ -162,3 +162,36 @@ def test_small_search_budgets_bypass_dynamic_filtering(budget, expect_direct):
     web = [t for t in messages.calls[0]["tools"] if t["name"] in ("web_search", "web_fetch")]
     assert all(("allowed_callers" in t) == expect_direct for t in web)
     assert web[0]["max_uses"] == budget
+
+
+def test_research_loop_caches_the_prefix_and_gives_up_on_a_dead_search_tool():
+    """Live run: 8 turns of a failing search tool re-sent a growing conversation: 330k input
+    tokens and $1.86 for zero sources."""
+    from rootlogic.llm import LLMError
+
+    def error_turn():
+        err = SimpleNamespace(type="web_search_tool_result",
+                              content=SimpleNamespace(type="web_search_tool_result_error",
+                                                      error_code="max_uses_exceeded"))
+        return SimpleNamespace(content=[err], stop_reason="end_turn", model="claude-opus-5",
+                               usage=SimpleNamespace(input_tokens=10, output_tokens=5,
+                                                     cache_read_input_tokens=0,
+                                                     cache_creation_input_tokens=0,
+                                                     server_tool_use=None))
+
+    class DeadSearch:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kw):
+            self.calls.append(kw)
+            return error_turn()
+
+    messages = DeadSearch()
+    client = SimpleNamespace(beta=SimpleNamespace(messages=messages))
+    llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
+    with pytest.raises(LLMError, match="web search is failing"):
+        llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
+
+    assert len(messages.calls) == 2                       # stops instead of burning 8 turns
+    assert messages.calls[0]["cache_control"] == {"type": "ephemeral"}

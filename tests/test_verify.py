@@ -10,6 +10,7 @@ from rootlogic.fake_llm import FakeLLM
 from rootlogic.filters import SourcePolicy, clean_domain, filter_sources
 from rootlogic.llm import LLMError, _search_hits
 from rootlogic.models import (CheckedClaim, ClaimDraft, ClaimVerdictDraft, Credibility, Finding,
+                              FindingDraft,
                               Plan, ReportDraft, SearchHit, SourceDraft, VerificationDraft)
 from rootlogic.store import Store
 from rootlogic.verify import (check_report, corroborate, evidence_from_hits, quote_in,
@@ -30,7 +31,10 @@ def finding(task_id, claims, sources):
                    confidence="high")
 
 
-PAGE = "The survey was published in March. Unemployment fell to 3.9 percent in 2025, the agency said."
+PAGE = ("The survey was published in March by the national statistics agency. Unemployment fell "
+        "to 3.9 percent in 2025, the agency said, the lowest rate recorded since the series "
+        "began. Regional breakdowns, the sampling frame and revisions to earlier quarters are "
+        "set out in the accompanying tables and methodology notes.")
 
 
 def verdicts(*items):
@@ -72,7 +76,9 @@ def test_missing_evidence_is_fetched_within_budget():
 
     def fetch(url):
         fetched.append(url)
-        return "claim text here and more words for the quote"
+        return ("claim text here and more words for the quote, padded out to the length of a "
+                "real page so it counts as usable evidence rather than navigation boilerplate. "
+                "Methodology and further detail follow below in the appendix of this report.")
 
     verify_findings([f], llm=FakeLLM(), evidence={}, fetch=fetch, max_fetches=2)
     assert len(fetched) == 2
@@ -82,7 +88,10 @@ def test_missing_evidence_is_fetched_within_budget():
 def test_claim_budget_is_spread_across_findings_and_rest_is_unchecked():
     fs = [finding(f"t{i}", [(f"c{i}{j}", [f"https://a{i}.org"]) for j in range(3)],
                   [src(f"https://a{i}.org")]) for i in range(3)]
-    evidence = {f"https://a{i}.org": "c00 c01 c02 c10 c11 c12 c20 c21 c22 evidence page" for i in range(3)}
+    page = ("c00 c01 c02 c10 c11 c12 c20 c21 c22 evidence page with enough surrounding text to "
+            "count as real content rather than a navigation stub, including methodology notes "
+            "and a description of how the figures were collected and weighted.")
+    evidence = {f"https://a{i}.org": page for i in range(3)}
     verify_findings(fs, llm=FakeLLM(), evidence=evidence, max_claims=4)
     checked_per_finding = [sum(c.verdict != "unchecked" for c in f.checks) for f in fs]
     assert sorted(checked_per_finding) == [1, 1, 2]
@@ -103,7 +112,8 @@ def test_verifier_failure_leaves_claims_unchecked():
     f = finding("t1", [("c", ["https://a.org"])], [src("https://a.org")])
     events = []
     verify_findings([f], llm=FakeLLM(handlers={VerificationDraft: boom}),
-                    evidence={"https://a.org": "c page"}, emit=lambda t, m, **k: events.append(t))
+                    evidence={"https://a.org": "c page " * 40},
+                    emit=lambda t, m, **k: events.append(t))
     assert f.checks[0].verdict == "unchecked" and events == ["verify.skipped"]
 
 
@@ -272,3 +282,61 @@ def test_server_web_fetch_results_become_evidence():
     assert [(h.url, h.text) for h in hits] == [("https://a.com/x", "page body")]
     assert evidence_from_hits(hits + [SearchHit(url="https://b.com", title="")]) == \
         {"https://a.com/x": "page body"}
+
+
+def test_unreadable_pages_are_unverifiable_never_unsupported():
+    """Live run bug: a landing page of navigation text marked 7 true claims 'unsupported'.
+
+    Failing to read a page is not evidence against a claim.
+    """
+    f = finding("t1", [("64% cited back-end automation", ["https://inst.org/report"])],
+                [src("https://inst.org/report")])
+    llm = FakeLLM(handlers=verdicts((1, "no_usable_evidence", "", )))
+    verify_findings([f], llm=llm, evidence={"https://inst.org/report": "Home About Subscribe " * 20})
+    assert f.checks[0].verdict == "unverifiable"
+
+
+def test_navigation_sized_evidence_is_not_even_sent_to_the_verifier():
+    f = finding("t1", [("a claim", ["https://a.org/x"])], [src("https://a.org/x")])
+    llm = FakeLLM()
+    verify_findings([f], llm=llm, evidence={"https://a.org/x": "Skip to content. Menu."})
+    assert f.checks[0].verdict == "unverifiable" and not llm.calls
+
+
+# ------------------------------------------------------------------ retrying dead sub-tasks
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_subtask_that_retrieves_nothing_is_retried_then_failed(tmp_path, kind):
+    """Live run: two sub-tasks came back with zero sources after a search outage, were marked
+    'done', and the task cap then blocked the critic from re-running them."""
+    from rootlogic.fake_llm import FakeLLM, default_finding
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.orchestrator import Budget, Orchestrator
+
+    from .test_orchestrator import ScriptedUI
+
+    attempts = {"n": 0}
+
+    def flaky(prompt):
+        if "current state" not in prompt:
+            return default_finding(prompt, 2)
+        attempts["n"] += 1
+        empty = default_finding(prompt, 1)
+        empty.sources, empty.claims = [], []
+        empty.gaps = ["web search returned nothing"]
+        return empty
+
+    store = Store()
+    ui = ScriptedUI()
+    kw = dict(budget=Budget(max_retries=1), reports_dir=tmp_path, today=TODAY)
+    llm = FakeLLM(handlers={FindingDraft: flaky})
+    engine = (ResearchGraph(llm, store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(llm, store, ui, **kw))
+    report = engine.run("impact of generative AI on newsrooms")
+
+    assert attempts["n"] == 2                       # one retry, then given up on
+    types = ui.types()
+    assert "task.retry" in types and "task.failed" in types
+    assert {t["task_id"]: t["status"] for t in store.tasks(engine.sid)}["t1"] == "failed"
+    assert report is not None                       # the other sub-tasks still produced a report

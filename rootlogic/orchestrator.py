@@ -38,6 +38,7 @@ class Budget:
     max_parallel: int = 4      # concurrent research sub-agents
     max_searches: int = 8      # web searches per sub-agent
     verify_claims: int = 12    # claims checked against their cited pages (0 = no verification)
+    max_retries: int = 1       # re-runs of a sub-task that found nothing (tool errors happen)
 
 
 class Orchestrator:
@@ -194,6 +195,7 @@ class Orchestrator:
     def _run_wave(self, plan: Plan, tasks: list[SubTask]) -> None:
         for t in tasks:
             t.status = "running"
+            t.attempts += 1
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
             self._emit("task.started", f"[{t.id}] Researching: {t.question}", task=t.id)
 
@@ -204,12 +206,23 @@ class Orchestrator:
                 try:
                     result = fut.result()
                 except (LLMError, AgentRefusal) as e:
-                    t.status = "failed"
-                    self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
-                    self._emit("task.failed", f"[{t.id}] Failed: {e}", task=t.id)
+                    self._task_failed(t, str(e))
                     continue
                 self._accept_finding(plan, t, result)
         self._save_plan(plan)
+
+    def _task_failed(self, task: SubTask, reason: str) -> None:
+        """Retry a sub-task that found nothing: tool outages are usually transient, and a
+        retry shouldn't need a new task slot from the budget."""
+        if task.attempts <= self.budget.max_retries:
+            task.status = "pending"
+            self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
+            self._emit("task.retry", f"[{task.id}] {reason} — retrying "
+                       f"({task.attempts}/{self.budget.max_retries + 1})", task=task.id)
+            return
+        task.status = "failed"
+        self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
+        self._emit("task.failed", f"[{task.id}] Failed: {reason}", task=task.id)
 
     def _research_task(self, plan: Plan, task: SubTask) -> tuple[FindingDraft, list]:
         """Runs in a worker thread: only calls the LLM, never the UI or shared state."""
@@ -236,6 +249,13 @@ class Orchestrator:
             self.store.add_source(self.sid, task.id, s.url, title=s.title, published=s.published,
                                   credibility=s.credibility.level, kept=True,
                                   data=s.model_dump_json())
+        # Nothing retrieved at all (tool outage, dead searches) is worth retrying. Sources
+        # that were retrieved and then filtered out (duplicates in a follow-up, outdated,
+        # blocked) are a real result, not a failure.
+        if not draft.sources:
+            self._task_failed(task, "retrieved no sources ("
+                              + ("; ".join(draft.gaps[:1]) or "nothing came back") + ")")
+            return
         self.findings[task.id] = finding
         task.status = "done"
         self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin,

@@ -293,6 +293,7 @@ class ResearchGraph:
         wave = plan.ready()
         for t in wave:
             t.status = "running"
+            t.attempts += 1
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
             self._emit("task.started", f"[{t.id}] Researching: {t.question}", task=t.id)
         if not wave and s.get("rounds", 0) >= self.budget.max_rounds:
@@ -328,12 +329,14 @@ class ResearchGraph:
             if task is None or task.status != "running":
                 continue
             if "error" in item:
-                task.status = "failed"
-                self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
-                self._emit("task.failed", f"[{task.id}] Failed: {item['error']}", task=task.id)
+                self._task_failed(task, item["error"])
                 continue
             draft = FindingDraft.model_validate(item["draft"])
             hits = [SearchHit.model_validate(h) for h in item["hits"]]
+            if not draft.sources:   # nothing retrieved: a retry may do better (see orchestrator)
+                self._task_failed(task, "retrieved no sources ("
+                                  + ("; ".join(draft.gaps[:1]) or "nothing came back") + ")")
+                continue
             finding = ctx.curate(task, draft, hits, recency_days=plan.recency_days,
                                  today=self.today, seen_urls=seen,
                                  blocked_domains=self.blocked_domains, policy=self._policy())
@@ -453,6 +456,18 @@ class ResearchGraph:
         return {"status": "done", "report": {**s["report"], "full": report.model_dump()}}
 
     # ================================================================== helpers
+    def _task_failed(self, task: SubTask, reason: str) -> None:
+        """Retry a sub-task that retrieved nothing; a retry needs no new task slot."""
+        if task.attempts <= self.budget.max_retries:
+            task.status = "pending"
+            self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
+            self._emit("task.retry", f"[{task.id}] {reason} — retrying "
+                       f"({task.attempts}/{self.budget.max_retries + 1})", task=task.id)
+            return
+        task.status = "failed"
+        self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
+        self._emit("task.failed", f"[{task.id}] Failed: {reason}", task=task.id)
+
     def _policy(self) -> SourcePolicy:
         return self.source_policy or SourcePolicy.from_rules(self.store.source_rules())
 

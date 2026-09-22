@@ -128,7 +128,7 @@ class ProfileUpdate(Strict):
 
 class ClaimVerdictDraft(Strict):
     claim_number: int = Field(description="The claim's number as given in the prompt.")
-    verdict: Literal["supported", "partially_supported", "unsupported"]
+    verdict: Literal["supported", "partially_supported", "unsupported", "no_usable_evidence"]
     quote: str = Field(description="A short VERBATIM quote from the evidence that supports the "
                                    "claim; empty string if there is none.")
     note: str = Field(description="One sentence: what the evidence does or doesn't say.")
@@ -156,6 +156,7 @@ class SubTask(BaseModel):
     depends_on: list[str] = []
     status: TaskStatus = "pending"
     origin: Literal["planner", "reflection", "user", "previous"] = "planner"
+    attempts: int = 0        # research attempts so far (a retry doesn't need a new task slot)
 
 
 class Plan(BaseModel):

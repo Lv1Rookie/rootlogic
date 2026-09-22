@@ -47,7 +47,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 162 tests, no network
+pytest                       # 167 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -214,7 +214,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 
 | Guardrail | How it works | Model or code? |
 |---|---|---|
-| **Claim verification** | Each claim is checked against the text of the pages it cites, captured when sub-agents fetch them or fetched for the check. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. No page text means **unverifiable**, never assumed true. Claims that fail are withheld from the writer as fact. | model judges, code checks |
+| **Claim verification** | Each claim is checked against the text of the pages it cites, captured when sub-agents fetch them or fetched for the check. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. Missing, too-short or unusable page text (navigation, paywall, wrong page) means **unverifiable**, never "unsupported": failing to read a page says nothing about the claim. Claims that fail are withheld from the writer as fact. | model judges, code checks |
 | **Corroboration labels** | *corroborated* (2+ independent sites), *single source*, or *weak* (only low-credibility sources). Low-credibility sources can support a claim but never alone. | code |
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
 | **Report checks** | `[n]` citations pointing at no source become `[?]`. Uncited factual-looking sentences and takeaways citing only low-credibility sources are listed. Every report ends with **Confidence and limitations** and a **Claim check** table. | code |

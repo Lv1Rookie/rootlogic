@@ -210,13 +210,26 @@ class AnthropicLLM:
         tools = [*web_tools, submit_tool]
         messages: list[dict] = [{"role": "user", "content": prompt}]
         hits: list[SearchHit] = []
+        broken_turns = 0
 
         for _ in range(8):
+            # Cache the prefix: each turn re-sends the whole conversation, and search results
+            # are bulky. Without this, a long loop pays full price for the same tokens again.
             response = self._create(purpose, max_tokens=16000, system=system, tools=tools,
-                                    messages=messages, output_config={"effort": "medium"})
-            hits.extend(_search_hits(response.content))
+                                    messages=messages, output_config={"effort": "medium"},
+                                    cache_control={"type": "ephemeral"})
+            new_hits = _search_hits(response.content)
+            hits.extend(new_hits)
             if (found := self._submitted(response, schema)) is not None:
                 return found, hits
+
+            # Web search that keeps erroring (budget, rate limit) will not fix itself: stop
+            # paying for turns that can't produce sources.
+            errors = _tool_errors(response.content)
+            broken_turns = broken_turns + 1 if errors and not new_hits else 0
+            if broken_turns >= 2 and not hits:
+                raise LLMError(f"{purpose}: web search is failing ({', '.join(sorted(errors))}); "
+                               "no sources could be retrieved")
 
             messages.append({"role": "assistant", "content": response.content})
             if response.stop_reason == "pause_turn":
@@ -277,6 +290,20 @@ def _search_hits(content) -> list[SearchHit]:
                 hits.append(SearchHit(url=url, title=getattr(r, "title", "") or "",
                                       page_age=getattr(r, "page_age", None)))
     return hits
+
+
+def _tool_errors(content) -> set[str]:
+    """Error codes from server tool results, e.g. {'max_uses_exceeded'}."""
+    codes = set()
+    for block in content:
+        if not block.type.endswith("_tool_result"):
+            continue
+        result = block.content
+        if isinstance(result, list):
+            continue
+        if code := getattr(result, "error_code", None):
+            codes.add(code)
+    return codes
 
 
 def _fetched_page(result) -> SearchHit | None:

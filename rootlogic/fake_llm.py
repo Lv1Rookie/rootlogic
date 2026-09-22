@@ -102,8 +102,12 @@ def default_profile(prompt: str) -> ProfileUpdate:
                               for s in said])
 
 
-PRIMARY_PAGE = ("Annual data release. Figures rose year over year in every region we track, "
-                "driven by adoption in mid-sized organisations. Methodology and caveats follow.")
+PRIMARY_PAGE = (
+    "Annual data release. Figures rose year over year in every region we track, driven by "
+    "adoption in mid-sized organisations. The survey ran from January to March and collected "
+    "responses from 1,200 organisations across 14 countries, weighted by sector and size. "
+    "Growth was strongest in the first half of the year before flattening in the autumn. "
+    "Methodology, sampling frame, weighting and caveats follow in the appendix.")
 
 
 def default_verification(prompt: str) -> VerificationDraft:

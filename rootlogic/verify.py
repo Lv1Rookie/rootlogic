@@ -29,6 +29,7 @@ from .llm import LLM, AgentRefusal, LLMError
 from .models import (CheckedClaim, Finding, ReportDraft, ReportQuality, SearchHit, SourceDraft,
                      VerificationDraft)
 
+MIN_EVIDENCE = 200          # less text than this is navigation/boilerplate, not page content
 CHUNK = 1500                # characters per evidence chunk
 CHUNKS_PER_SOURCE = 3       # most relevant chunks shown per cited page
 SOURCES_PER_CLAIM = 3
@@ -139,13 +140,13 @@ def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, st
                     result.fetched += 1
                     if text := fetch(url):
                         evidence[key] = text
-                if key in evidence:
-                    pages[url] = evidence[key]
+                if len(evidence.get(key, "")) >= MIN_EVIDENCE:
+                    pages[url] = evidence[key]   # too short to be real content: not evidence
             if pages:
                 to_judge.append((i + 1, check, pages))
             else:
                 check.verdict = "unverifiable"
-                check.note = "No page text available for the cited sources."
+                check.note = "No usable page text for the cited sources."
         if to_judge:
             _judge(f, to_judge, llm, result, emit)
         for check in checks:
@@ -181,7 +182,11 @@ def _judge(f: Finding, items: list[tuple[int, CheckedClaim, dict[str, str]]], ll
         found = quote_in(v.quote, list(pages.values()))
         check.note = v.note
         check.quote = v.quote if found else ""
-        if v.verdict == "supported" and not found:
+        if v.verdict == "no_usable_evidence":
+            # We failed to READ the page (navigation, paywall, wrong page). That tells us
+            # nothing about the claim, so it must not be reported as contradicted.
+            check.verdict = "unverifiable"
+        elif v.verdict == "supported" and not found:
             check.verdict = "partially_supported"
             check.note = ("Downgraded: the supporting quote was not found in the source text. "
                           + v.note)

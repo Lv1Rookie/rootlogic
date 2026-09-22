@@ -236,7 +236,7 @@ check that:
   unscreened by accident.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 162 tests run in a few seconds with no internet.
+is added first. All 167 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -434,6 +434,17 @@ screen it themselves.
 
 `rootlogic eval` scores every run the same way and saves a JSON file. `--baseline` compares two
 runs, so "the guardrail helped" becomes a number.
+
+Three lessons from the first live runs, each now covered by a test:
+- **"Couldn't read it" is not "it's false."** A landing page of navigation text made the
+  verifier mark seven true claims "unsupported". Unusable or too-short page text is now
+  "unverifiable", and the verifier has an explicit `no_usable_evidence` verdict.
+- **A dead tool should stop the run, not repeat it.** A failing web search produced eight
+  turns of a growing conversation: 330k input tokens and $1.86 for zero sources. The loop now
+  gives up after two fruitless turns, and caches its prefix so retries are cheap.
+- **Retrieving nothing deserves a retry, not a "done".** Sub-tasks that came back empty were
+  marked done, so the critic couldn't re-run them. They now retry once without consuming a
+  task slot. Sources that were retrieved and then *filtered* still count as a real result.
 
 Two design decisions worth explaining:
 - **Checks that fail never turn into passes.** If the verifier call errors, its claims stay
