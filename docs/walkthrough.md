@@ -34,6 +34,7 @@ Every line of the assignment PDF was mapped to a feature before any code was wri
 | Long-term memory (bonus) | Past sessions feed new plans and suggest topics; a learned user profile; follow-up threads that build on earlier findings |
 | Action log + override (bonus) | Every step is logged; plan approve/edit; Ctrl-C pause menu |
 | Testable orchestration code | LLM hidden behind a small interface, so tests swap in a fake |
+| *(not asked for, but needed)* | Guardrails against wrong or harmful output: claim verification, corroboration, report checks, content moderation, and an evaluation set that measures them (Steps 18–19) |
 
 The same mapping appears in the README, which is where graders look for it.
 
@@ -43,13 +44,15 @@ The pattern is **orchestrator–workers with an evaluator loop**, as described i
 "Building effective agents" guide:
 
 ```
-You → Clarify → Plan → [you approve] → Workers research in parallel
-                                          ↓
-                          Filter sources → Reflect: enough?
-                             ↑  no: add tasks / ask you  ↓ yes
-                             └──────────────   Verify claims → Analyze contradictions
-                                                  → Write report → Check report → Save to memory
+You → [screen request] → Clarify → Plan → [you approve] → Workers research in parallel
+                                                             ↓
+                                             Filter sources → Reflect: enough?
+                                ↑  no: add tasks / ask you  ↓ yes
+                                └───────────  Verify claims → Analyze contradictions
+                      → Write report → Check report → [screen report] → Save to memory
 ```
+
+The bracketed screening steps only run for models without built-in safety systems (Step 19).
 
 The two checking steps (verify claims, check report) were added last, in Step 18; the rest is
 the original design.
@@ -77,7 +80,7 @@ Added later, each for a specific reason:
 | **LangGraph** | A second engine with checkpointing and resume | 13 |
 | **FastAPI** | A web UI that streams progress to the browser | 14 |
 | **Tavily** (optional) | Web search that doesn't depend on one LLM vendor | 15 |
-| **OpenAI SDK** (optional) | Run on GPT, local models (Ollama) or OpenRouter | 17 |
+| **OpenAI SDK** (optional) | Run on GPT, local models (Ollama) or OpenRouter; also the moderation backends | 17, 19 |
 
 Nothing new was needed for Step 18 (guardrails and evaluation): it's plain Python on top of the
 same interfaces.
@@ -121,23 +124,25 @@ search, which was the one part still tied to Claude, and Step 17 adds the second
 
 This is the heart of the project. `run()` reads top to bottom like a recipe:
 
-1. **Recall:** search memory for related past sessions.
-2. **Clarify:** ask Claude whether the topic is vague, and if so ask the user up to 3 questions.
-3. **Plan:** Claude produces 3–6 sub-tasks and chooses how recent sources must be (e.g. 365
+1. **Screen the request** (Step 19, non-Claude models only): a harmful topic stops here, before
+   any model call.
+2. **Recall:** search memory for related past sessions.
+3. **Clarify:** ask Claude whether the topic is vague, and if so ask the user up to 3 questions.
+4. **Plan:** Claude produces 3–6 sub-tasks and chooses how recent sources must be (e.g. 365
    days for tech news, no limit for history).
-4. **User reviews the plan:** approve, edit or quit.
-5. **Research loop:**
+5. **User reviews the plan:** approve, edit or quit.
+6. **Research loop:**
    - Run every sub-task that's ready, in parallel threads. A task is ready once the tasks
      it depends on have finished.
    - Filter each worker's sources.
    - When nothing is left to run, **reflect**: is this enough? If not, add follow-up tasks
      or ask the user something.
    - Stop when sufficient or when the budget runs out.
-6. **Verify** (added in Step 18): check claims against the text of their cited pages and
+7. **Verify** (added in Step 18): check claims against the text of their cited pages and
    label how well each is corroborated.
-7. **Analyze:** find what sources agree on and where they contradict each other.
-8. **Write:** produce a Markdown report with numbered citations, run code checks on it (bad
-   citations, uncited statements), and save it to memory.
+8. **Analyze:** find what sources agree on and where they contradict each other.
+9. **Write:** produce a Markdown report with numbered citations, run code checks on it (bad
+   citations, uncited statements), screen it (Step 19), and save it to memory.
 
 A `Budget` caps reflection rounds, total tasks, parallel workers, searches per worker and, since
 Step 18, how many claims get verified.
@@ -226,6 +231,9 @@ check that:
   - Source rules block, allow and override credibility.
   - Bad citations are fixed and uncited statements flagged.
 - The evaluation harness scores facts, hoaxes, contradictions, stale sources and refusals correctly.
+- Moderation blocks harmful requests before any model call, keeps flagged reports off disk,
+  ignores flagged user input without ending the run, and never runs a non-Claude model
+  unscreened by accident.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
 is added first. All 157 tests run in a few seconds with no internet.
@@ -297,6 +305,7 @@ another implementation of `Interaction`.
     sessions (Step 16).
   - A **Source rules** panel and a **Verify claims** toggle (Step 18).
   - Reports now show the **Confidence and limitations** section and the **Claim check** table.
+  - Sessions stopped by moderation show a `blocked` status (Step 19).
 
 Testing it in a real browser caught two bugs the unit tests missed:
 - A new task could reuse an existing id after the user dropped one. `Plan.next_id()` now
@@ -381,6 +390,9 @@ rootlogic changes when you pass `--provider openai`.
 The adapter was written against the installed `openai` SDK's actual types, not from memory. Its
 tests replay real SDK response objects, so no network is needed.
 
+One thing this opened up had to be closed again in Step 19: Claude screens harmful requests
+itself, and an arbitrary model may not.
+
 ## Step 18: Guardrails and proof → [`verify.py`](../rootlogic/verify.py) + [`evaluate.py`](../rootlogic/evaluate.py)
 
 The honest starting point: nothing earlier *ensured* reports were accurate, and nothing
@@ -405,6 +417,9 @@ A new **verify** stage runs between research and analysis in both engines:
 4. **Report checks** (pure code): citations pointing at no source become `[?]`, and uncited
    factual sentences and weakly sourced takeaways are listed. Every report ends with
    **Confidence and limitations** and a **Claim check** table.
+
+These four address *wrong* output. Step 19 addresses *harmful* output for models that don't
+screen it themselves.
 
 **Proving it: the evaluation set.** Guardrails are only as good as their measured effect.
 [`evals/cases.json`](../evals/cases.json) has 20 cases, each targeting one failure:
@@ -474,7 +489,8 @@ Every change went through the same routine:
    Rich hiding `[t1]` as a formatting tag. The browser caught the duplicate task ids and the
    orphaned "running" sessions.
 3. Checked external facts (API shapes, pricing, protocol versions) against official docs. For
-   the OpenAI adapter, that meant reading the installed SDK's own types, not relying on memory.
+   the OpenAI adapter, that meant reading the installed SDK's own types; for moderation, the
+   SDK's moderation types and Ollama's documented Llama Guard output format.
 4. For the guardrails, ran the evaluation harness offline to confirm it **fails** cases it
    should fail (the fake model knows no facts), then checked in the browser that a distrust
    rule visibly changes a report's corroboration labels.
@@ -503,6 +519,8 @@ Every change went through the same routine:
    - Show a report's **Confidence and limitations** and **Claim check** sections, then
      `rootlogic sources distrust <site>` and run again: the labels change.
    - `rootlogic eval --kind hoax --kind harmful` (live) to show the guardrails measured.
+   - With a local model (`--provider openai --base-url … --moderation llama-guard`), a harmful
+     topic stops at `session.blocked` before any model call.
    - `--engine graph`: kill it mid-run, then `rootlogic resume <id>`.
    - `rootlogic web`: the same flow in the browser, including refresh mid-run.
 4. **Be ready to explain:**
