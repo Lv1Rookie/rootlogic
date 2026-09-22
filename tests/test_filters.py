@@ -65,3 +65,14 @@ def test_fill_dates_from_search_hits():
     s = src("https://a.com/1", published="unknown")
     fill_dates_from_hits([s], [SearchHit(url="https://www.a.com/1", title="", page_age="2 days ago")])
     assert s.published == "2 days ago"
+
+
+def test_plan_ids_stay_unique_after_drop():
+    from rootlogic.models import Plan, SubTask, SubTaskDraft
+    plan = Plan(topic="x", objective="o", recency_days=0, subtasks=[
+        SubTask(id=f"t{i}", question=f"q{i}", rationale="r", search_queries=[]) for i in (1, 2, 3)])
+    plan.subtasks = [t for t in plan.subtasks if t.id != "t2"]
+    new = plan.add(SubTaskDraft(question="new", rationale="r", search_queries=[], depends_on=[]),
+                   "user")
+    assert new.id == "t4"
+    assert len({t.id for t in plan.subtasks}) == len(plan.subtasks)

@@ -128,12 +128,13 @@ def show_plan(plan: Plan) -> None:
 # =================================================================== commands
 
 
-def build_engine(args: argparse.Namespace, store: Store, engine: str):
-    """Construct the chosen engine. Both expose .run(topic), .control and .sid."""
-    ui = TerminalUI(auto_approve=getattr(args, "yes", False),
-                    verbose=getattr(args, "verbose", False))
-    budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
-                    max_parallel=args.parallel, max_searches=args.searches)
+def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
+                  budget: Budget | None = None, home: Path = HOME):
+    """Construct an engine with usage accounting wired to the store.
+
+    Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
+    """
+    budget = budget or Budget()
     holder: dict = {}
     usage_sink = lambda u: store.record_call(  # noqa: E731
         session_id=holder["e"].sid or None, purpose=u.purpose, model=u.model,
@@ -142,7 +143,7 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
         web_searches=u.web_searches, cost_usd=u.cost_usd, stop_reason=u.stop_reason,
         request_id=u.request_id)
 
-    if args.offline:
+    if offline:
         from .fake_llm import FakeLLM
         llm = FakeLLM(usage_sink)
     else:
@@ -151,11 +152,20 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
 
     if engine == "graph":
         from .graph import ResearchGraph
-        eng = ResearchGraph(llm, store, ui, checkpoint_path=HOME / "checkpoints.db",
-                            budget=budget, reports_dir=HOME / "reports")
+        eng = ResearchGraph(llm, store, ui, checkpoint_path=home / "checkpoints.db",
+                            budget=budget, reports_dir=home / "reports")
     else:
-        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=HOME / "reports")
+        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports")
     holder["e"] = eng
+    return eng
+
+
+def build_engine(args: argparse.Namespace, store: Store, engine: str):
+    ui = TerminalUI(auto_approve=getattr(args, "yes", False),
+                    verbose=getattr(args, "verbose", False))
+    budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
+                    max_parallel=args.parallel, max_searches=args.searches)
+    eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget)
     install_pause_handler(eng, ui)
     return eng
 
@@ -202,6 +212,20 @@ def cmd_resume(args: argparse.Namespace, store: Store) -> int:
     except ValueError as e:
         console.print(f"[red]{e}[/] (only sessions started with --engine graph can resume)")
         return 1
+
+
+def cmd_web(args: argparse.Namespace, store: Store) -> int:
+    try:
+        from .web import serve
+    except ImportError:
+        console.print("[red]Web UI needs extra packages:[/] pip install -e '.[web]'")
+        return 1
+    if args.host not in ("127.0.0.1", "localhost"):
+        console.print("[yellow]Warning: the web UI has no authentication and spends your API "
+                      "credits. Only expose it on a network you trust.[/]")
+    console.print(f"rootlogic web UI → http://{args.host}:{args.port}  (Ctrl-C to stop)")
+    serve(args.db, HOME, host=args.host, port=args.port)
+    return 0
 
 
 def cmd_graph(args: argparse.Namespace, store: Store) -> int:
@@ -289,6 +313,11 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("session")
     rs.add_argument("--offline", action="store_true")
     rs.set_defaults(fn=cmd_resume, rounds=2, max_tasks=10, parallel=4, searches=5)
+
+    w = sub.add_parser("web", help="start the web UI (FastAPI + SSE)")
+    w.add_argument("--host", default="127.0.0.1")
+    w.add_argument("--port", type=int, default=8000)
+    w.set_defaults(fn=cmd_web)
 
     gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")
     gr.set_defaults(fn=cmd_graph)

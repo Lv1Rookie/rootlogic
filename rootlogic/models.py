@@ -134,7 +134,9 @@ class Plan(BaseModel):
         return next((t for t in self.subtasks if t.id == task_id), None)
 
     def next_id(self) -> str:
-        return f"t{len(self.subtasks) + 1}"
+        # Max existing id, not len(): ids must stay unique after the user drops a task.
+        nums = [int(t.id[1:]) for t in self.subtasks if t.id[1:].isdigit()]
+        return f"t{max(nums, default=0) + 1}"
 
     def add(self, draft: SubTaskDraft, origin: str) -> SubTask:
         task = SubTask(

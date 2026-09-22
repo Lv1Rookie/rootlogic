@@ -20,7 +20,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     topic TEXT NOT NULL,
-    status TEXT NOT NULL,              -- running | done | aborted | failed
+    status TEXT NOT NULL,              -- running | done | aborted | failed | interrupted
     created_at TEXT NOT NULL,
     finished_at TEXT,
     plan_json TEXT,
@@ -136,6 +136,11 @@ class Store:
 
     def sessions(self, limit: int = 20) -> list[dict[str, Any]]:
         return self._all("SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,))
+
+    def mark_interrupted(self) -> int:
+        """Sessions left 'running' by a process that died. Returns how many were marked."""
+        cur = self._exec("UPDATE sessions SET status = 'interrupted' WHERE status = 'running'")
+        return cur.rowcount
 
     def delete_session(self, sid: str) -> None:
         self._exec("DELETE FROM memory_fts WHERE session_id = ?", (sid,))

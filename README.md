@@ -28,12 +28,13 @@ $ rootlogic research "impact of generative AI on local newsrooms"
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e '.[dev]'            # add '.[web]' instead of '.[dev]' for just the web UI
 
 rootlogic research --offline -y "any topic"      # no API key needed: deterministic fake LLM
 export ANTHROPIC_API_KEY=sk-ant-...              # or `ant auth login`
 rootlogic research "your topic"                  # live: Claude + web search
 
+rootlogic web                                    # web UI at http://127.0.0.1:8000
 rootlogic research --engine graph "topic"       # LangGraph engine (resumable)
 rootlogic resume <session>   # continue a graph session after a crash / quit
 rootlogic graph              # print the LangGraph engine as a Mermaid diagram
@@ -42,7 +43,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 37 tests, no network
+pytest                       # 48 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -100,6 +101,9 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `control.py` | `Event`, `Command`, `Interaction` protocol, thread-safe pause flag. |
 | `prompts.py` | Static role prompts (clarifier, planner, researcher, critic, analyst, writer). |
 | `cli.py` | Rich terminal UI implementing `Interaction`. |
+| `web.py` + `static/index.html` | FastAPI + SSE web UI implementing `Interaction`; runs engines in background threads. |
+| `graph.py` | The same agent as a LangGraph state machine (checkpoints, `interrupt()`, resume). |
+| `context.py` | Pure prompt builders and source curation shared by both engines. |
 | `fake_llm.py` | Deterministic LLM for tests and `--offline` demos. |
 
 ### Key design decisions
@@ -144,6 +148,24 @@ of how this project was built. See [docs/research/agentic-research-assistant.md]
 for the research behind these choices (frameworks, storage options, protocols, UX, tools) and an
 alternative architecture (LangGraph + web UI).
 
+## Web UI
+
+`rootlogic web` serves a single-page UI (no build step) at http://127.0.0.1:8000:
+
+- **Start** a run (topic, engine, offline toggle), with suggested next topics from memory.
+- **Answer** clarifying questions, then **edit the plan** (drop/add sub-tasks, set max source age) before anything is spent.
+- **Pause & override** mid-run: skip pending tasks, add one, give guidance, stop and write now, or abort.
+- **Watch** the live action log and plan status, then read the rendered report and per-step token/cost table.
+- **History:** reopen any past session. Sessions left `interrupted` by a server restart can be **resumed** (graph engine).
+
+How it works: each run executes in a background thread. `WebInteraction` implements the same
+`Interaction` protocol as the terminal UI. When the agent needs a human it publishes a `request`
+event and blocks until the browser POSTs an answer. The browser follows one SSE stream
+(`GET /api/runs/{id}/events`) whose events carry sequential ids, so a refresh replays from
+`Last-Event-ID` and rebuilds the page. Report Markdown is sanitized (DOMPurify) before rendering.
+It binds to 127.0.0.1 because there is no authentication and runs spend API credits.
+API docs: `/api/docs`.
+
 ## Two engines
 
 The same agent is implemented twice: a hand-rolled orchestrator loop (default) and a
@@ -153,7 +175,6 @@ See [docs/langgraph-vs-loop.md](docs/langgraph-vs-loop.md) for a side-by-side co
 
 ## Roadmap
 
-- Web UI (FastAPI + SSE) implementing the same `Interaction` protocol
 - Resume interrupted sessions from `plan_json` + `tasks`
 - MCP client so users can plug in extra sources (Semantic Scholar, internal docs)
 - Embedding-based memory (sqlite-vec) alongside FTS5

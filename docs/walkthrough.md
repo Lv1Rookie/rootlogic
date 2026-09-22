@@ -142,7 +142,7 @@ The orchestrator never talks to the terminal directly. It emits **events** (log 
 calls an `Interaction` object for four things: `ask`, `review_plan`, `override` and `on_event`.
 
 - The terminal UI implements `Interaction`, and so do the tests.
-- A future web UI would be one more implementation, with no change to the core.
+- The web UI (Step 14) is one more implementation, with no change to the core.
 - Ctrl-C only sets a "pause" flag. The orchestrator checks it between waves, so it never
   stops halfway through a step.
 
@@ -184,8 +184,9 @@ check that:
 - A failing worker doesn't crash the session.
 - Memory recalls past topics.
 - The LangGraph engine resumes after a crash.
+- The web API round-trips questions, plan edits and overrides, and replays SSE.
 
-All 37 tests run in under a second with no internet.
+All 48 tests run in under a second with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -195,7 +196,7 @@ It shows:
 - The plan table, with approve/edit.
 - The override menu when you press Ctrl-C.
 
-It also adds the commands `history`, `log`, `usage`, `show`, `forget`, `resume` and `graph`.
+It also adds the commands `history`, `log`, `usage`, `show`, `forget`, `resume`, `graph` and `web`.
 `--offline` runs everything on the fake LLM, which makes the demo safe from network problems.
 
 ## Step 13: A second engine with LangGraph → [`graph.py`](../rootlogic/graph.py)
@@ -213,7 +214,30 @@ nothing with side effects may run before an `interrupt()` in the same step (beca
 step re-runs on resume). The full comparison is in
 [langgraph-vs-loop.md](langgraph-vs-loop.md).
 
-## Step 14: Check it, then publish
+## Step 14: A web UI → [`web.py`](../rootlogic/web.py) + [`static/index.html`](../rootlogic/static/index.html)
+
+`rootlogic web` starts a FastAPI server. The design reuses Step 8's idea: the web UI is just
+another implementation of `Interaction`.
+
+- Each research run executes in a **background thread**, so the server stays responsive.
+- `WebInteraction.on_event` appends each event to the run's list.
+- `ask`, `review_plan` and `override` publish a `request` event, then **block the engine
+  thread** until the browser POSTs `/api/runs/{id}/answer`.
+- The browser follows **Server-Sent Events (SSE)**, a one-way stream from server to browser
+  over plain HTTP. It's simpler than WebSockets and enough here, because the browser's own
+  input goes over normal POSTs.
+- Events are numbered, so after a refresh the browser reconnects with `Last-Event-ID`,
+  replays the stream, and rebuilds the page.
+- The page is one HTML file with plain JavaScript (no build step). Report Markdown is
+  sanitized before display, because it originates from web content.
+
+Testing it in a real browser caught two bugs the unit tests missed:
+- A new task could reuse an existing id after the user dropped one. `Plan.next_id()` now
+  uses the highest id, not the count.
+- Sessions orphaned by a server restart stayed "running" forever. They're now marked
+  `interrupted` on startup, and graph-engine ones can be resumed.
+
+## Step 15: Check it, then publish
 
 The build was checked in this order:
 
@@ -238,6 +262,7 @@ The build was checked in this order:
    - `rootlogic usage <id>` for cost.
    - A second related topic (shows memory).
    - `--engine graph`: kill it mid-run, then `rootlogic resume <id>`.
+   - `rootlogic web`: the same flow in the browser, including refresh mid-run.
 4. **Be ready to explain:**
    - The LLM-decides-what / code-decides-how split.
    - Why structured outputs matter.
