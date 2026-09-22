@@ -159,7 +159,8 @@ class Orchestrator:
         prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
         return self.llm.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
                                  prompt=prompt, schema=FindingDraft,
-                                 max_searches=self.budget.max_searches)
+                                 max_searches=self.budget.max_searches,
+                                 recency_days=plan.recency_days)
 
     def _accept_finding(self, plan: Plan, task: SubTask, result: tuple[FindingDraft, list]) -> None:
         draft, hits = result

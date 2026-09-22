@@ -43,7 +43,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 51 tests, no network
+pytest                       # 65 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -51,6 +51,9 @@ rounds · `--max-tasks N` · `--parallel N` sub-agents · `--searches N` per sub
 `--zdr` Zero Data Retention mode (also on `resume` and `web`): sets `allowed_callers: ["direct"]`
 on the web tools, which makes them ZDR-eligible but turns off dynamic filtering, so searches may
 use more context tokens.
+`--search tavily` (also on `resume` and `web`): sub-agents search through our own `SearchProvider`
+tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in web tools. Needs
+`TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
 Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
 
 ## How it maps to the assignment
@@ -107,6 +110,7 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `web.py` + `static/index.html` | FastAPI + SSE web UI implementing `Interaction`; runs engines in background threads. |
 | `graph.py` | The same agent as a LangGraph state machine (checkpoints, `interrupt()`, resume). |
 | `context.py` | Pure prompt builders and source curation shared by both engines. |
+| `search.py` | `SearchProvider` protocol (`search`, `fetch`) + `TavilySearch`, `StaticSearch`. The model-agnostic path for web access. |
 | `fake_llm.py` | Deterministic LLM for tests and `--offline` demos. |
 
 ### Key design decisions
@@ -129,6 +133,9 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 - **Web content is untrusted**: researcher prompt forbids following instructions found in pages.
 - **Refusals**: server-side `fallbacks: "default"` retries safety-declined requests on a fallback
   model; a remaining refusal fails only that sub-task.
+- **Swappable web access**: sub-agents use either Claude's hosted `web_search`/`web_fetch` or our
+  own client tools backed by a `SearchProvider`. The client-tool path needs nothing
+  provider-specific, so any tool-calling model can run it through another `LLM` adapter.
 - **Model**: `claude-opus-5` for all roles; effort `low` for clarify, `medium` for research
   workers, `high` for plan/reflect/analyze/report.
 

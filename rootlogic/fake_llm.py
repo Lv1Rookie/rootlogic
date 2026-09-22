@@ -130,7 +130,7 @@ class FakeLLM:
         return self.handlers[schema](prompt)  # type: ignore[return-value]
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
         self._record(purpose, prompt, searches=2)
         with self._lock:
             self._n += 1

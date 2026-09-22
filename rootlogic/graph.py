@@ -256,7 +256,8 @@ class ResearchGraph:
             draft, hits = self.llm.research(purpose=f"research:{task.id}",
                                             system=prompts.RESEARCHER, prompt=prompt,
                                             schema=FindingDraft,
-                                            max_searches=self.budget.max_searches)
+                                            max_searches=self.budget.max_searches,
+                                            recency_days=plan.recency_days)
         except (LLMError, AgentRefusal) as e:
             return {"raw": [{"task_id": task.id, "error": str(e)}]}
         return {"raw": [{"task_id": task.id, "draft": draft.model_dump(),

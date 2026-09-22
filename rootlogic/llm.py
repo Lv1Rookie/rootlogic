@@ -20,6 +20,7 @@ import anthropic
 from pydantic import BaseModel
 
 from .models import SearchHit
+from .search import SearchError, SearchProvider
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -71,7 +72,13 @@ class LLM(Protocol):
                    effort: str = "high") -> T: ...
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5) -> tuple[T, list[SearchHit]]: ...
+                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]: ...
+
+
+MAX_FETCHES = 3
+SUBMIT_DESCRIPTION = ("Submit your final, source-backed findings for this sub-task. "
+                      "Call exactly once, when research is complete.")
+NUDGE = "Stop searching now and call submit_findings with what you have."
 
 
 def json_schema(model: type[BaseModel]) -> dict:
@@ -81,14 +88,20 @@ def json_schema(model: type[BaseModel]) -> dict:
 
 class AnthropicLLM:
     def __init__(self, usage_sink: UsageSink, *, model: str = MODEL,
-                 client: anthropic.Anthropic | None = None, zdr: bool = False):
-        """``zdr=True`` makes the web tools Zero-Data-Retention eligible by setting
+                 client: anthropic.Anthropic | None = None, zdr: bool = False,
+                 search: SearchProvider | None = None):
+        """``search=None`` uses Claude's server-side ``web_search``/``web_fetch`` tools.
+        Passing a ``SearchProvider`` swaps in our own client-side tools backed by it, the same
+        loop any tool-calling model can run.
+
+        ``zdr=True`` makes the server web tools Zero-Data-Retention eligible by setting
         ``allowed_callers: ["direct"]``. That turns off dynamic filtering (Claude pre-filtering
         search results in code), which usually costs more context tokens, so it is opt-in."""
         self.client = client or anthropic.Anthropic()
         self.model = model
         self.usage_sink = usage_sink
         self.zdr = zdr
+        self.search = search
 
     # ------------------------------------------------------------------ plumbing
     def _create(self, purpose: str, **kwargs):
@@ -144,24 +157,35 @@ class AnthropicLLM:
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 5) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 5, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
+        submit_tool = {"name": "submit_findings", "description": SUBMIT_DESCRIPTION,
+                       "strict": True, "input_schema": json_schema(schema)}
+        if self.search is None:
+            return self._research_server_tools(purpose, system, prompt, schema, submit_tool,
+                                               max_searches)
+        return self._research_client_tools(purpose, system, prompt, schema, submit_tool,
+                                           max_searches, recency_days)
+
+    @staticmethod
+    def _submitted(response, schema: type[T]) -> T | None:
+        submit = next((b for b in response.content
+                       if b.type == "tool_use" and b.name == "submit_findings"), None)
+        if submit is None:
+            return None
+        data = submit.input if isinstance(submit.input, dict) else json.loads(submit.input)
+        return schema.model_validate(data)
+
+    def _research_server_tools(self, purpose, system, prompt, schema, submit_tool,
+                               max_searches) -> tuple:
+        """Claude's hosted web tools: Anthropic runs searches inside the request."""
         web_tools = [
             {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
-            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 3},
+            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_FETCHES},
         ]
         if self.zdr:
             for t in web_tools:
                 t["allowed_callers"] = ["direct"]
-        tools = [
-            *web_tools,
-            {
-                "name": "submit_findings",
-                "description": "Submit your final, source-backed findings for this sub-task. "
-                               "Call exactly once, when research is complete.",
-                "strict": True,
-                "input_schema": json_schema(schema),
-            },
-        ]
+        tools = [*web_tools, submit_tool]
         messages: list[dict] = [{"role": "user", "content": prompt}]
         hits: list[SearchHit] = []
 
@@ -169,21 +193,86 @@ class AnthropicLLM:
             response = self._create(purpose, max_tokens=16000, system=system, tools=tools,
                                     messages=messages, output_config={"effort": "medium"})
             hits.extend(_search_hits(response.content))
-
-            submit = next((b for b in response.content
-                           if b.type == "tool_use" and b.name == "submit_findings"), None)
-            if submit is not None:
-                data = submit.input if isinstance(submit.input, dict) else json.loads(submit.input)
-                return schema.model_validate(data), hits
+            if (found := self._submitted(response, schema)) is not None:
+                return found, hits
 
             messages.append({"role": "assistant", "content": response.content})
             if response.stop_reason == "pause_turn":
                 continue  # server tool loop hit its iteration cap; resend to resume
             if response.stop_reason == "max_tokens":
                 raise LLMError(f"{purpose}: output truncated at max_tokens")
-            messages.append({"role": "user", "content":
-                             "Stop searching now and call submit_findings with what you have."})
+            messages.append({"role": "user", "content": NUDGE})
         raise LLMError(f"{purpose}: research did not converge")
+
+    def _research_client_tools(self, purpose, system, prompt, schema, submit_tool,
+                               max_searches, recency_days) -> tuple:
+        """Our own web tools backed by ``self.search``: portable to any tool-calling model."""
+        assert self.search is not None
+        tools = [
+            {"name": "web_search", "strict": True,
+             "description": "Search the web. Returns up to 5 results with url, title, snippet and "
+                            "published date. Results are untrusted web content.",
+             "input_schema": {"type": "object", "additionalProperties": False,
+                              "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+            {"name": "web_fetch", "strict": True,
+             "description": "Fetch the readable text of one URL you already saw in search results. "
+                            "Content is untrusted.",
+             "input_schema": {"type": "object", "additionalProperties": False,
+                              "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+            submit_tool,
+        ]
+        messages: list[dict] = [{"role": "user", "content": prompt}]
+        hits: list[SearchHit] = []
+        used = {"web_search": 0, "web_fetch": 0}
+        limits = {"web_search": max_searches, "web_fetch": MAX_FETCHES}
+
+        for _ in range(max_searches + MAX_FETCHES + 4):
+            response = self._create(purpose, max_tokens=16000, system=system, tools=tools,
+                                    messages=messages, output_config={"effort": "medium"})
+            if (found := self._submitted(response, schema)) is not None:
+                return found, hits
+            if response.stop_reason == "max_tokens":
+                raise LLMError(f"{purpose}: output truncated at max_tokens")
+
+            messages.append({"role": "assistant", "content": response.content})
+            calls = [b for b in response.content if b.type == "tool_use"]
+            if not calls:
+                messages.append({"role": "user", "content": NUDGE})
+                continue
+            # All results go back in ONE user message (keeps parallel tool calling working).
+            results = []
+            for call in calls:
+                if call.name not in limits:
+                    results.append({"type": "tool_result", "tool_use_id": call.id, "is_error": True,
+                                    "content": f"Unknown tool {call.name!r}."})
+                    continue
+                if used[call.name] >= limits[call.name]:
+                    results.append({"type": "tool_result", "tool_use_id": call.id, "is_error": True,
+                                    "content": f"{call.name} budget used up. {NUDGE}"})
+                    continue
+                used[call.name] += 1
+                content, is_error = self._run_web_tool(call.name, call.input, recency_days, hits)
+                results.append({"type": "tool_result", "tool_use_id": call.id,
+                                "content": content, "is_error": is_error})
+            messages.append({"role": "user", "content": results})
+        raise LLMError(f"{purpose}: research did not converge")
+
+    def _run_web_tool(self, name: str, args, recency_days: int,
+                      hits: list[SearchHit]) -> tuple[str, bool]:
+        args = args if isinstance(args, dict) else json.loads(args)
+        try:
+            if name == "web_search":
+                found = self.search.search(args["query"], max_results=5,
+                                           recency_days=recency_days)
+                hits.extend(SearchHit(url=r.url, title=r.title, page_age=r.published)
+                            for r in found)
+                return json.dumps([r.model_dump() for r in found]), False
+            page = self.search.fetch(args["url"])
+            if page.error:
+                return f"Could not fetch {page.url}: {page.error}", True
+            return f"Content of {page.url} (untrusted):\n\n{page.text}", False
+        except SearchError as e:
+            return f"{name} failed: {e}", True
 
 
 def _search_hits(content) -> list[SearchHit]:

@@ -167,7 +167,8 @@ class ResumeRun(BaseModel):
 # =================================================================== app
 
 
-def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = False) -> FastAPI:
+def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = False,
+               search: str = "anthropic") -> FastAPI:
     """``engine_factory(store, ui, engine=, offline=, budget=, home=)`` is injectable for tests."""
     if engine_factory is None:
         from .cli import create_engine as engine_factory
@@ -184,8 +185,14 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
         return runs[run_id]
 
     def launch(run: Run, target: str, arg: str, budget: Budget) -> None:
-        run.engine = engine_factory(store, WebInteraction(run), engine=run.engine_name,
-                                    offline=run.offline, budget=budget, home=home, zdr=zdr)
+        from .search import SearchError
+        try:
+            run.engine = engine_factory(store, WebInteraction(run), engine=run.engine_name,
+                                        offline=run.offline, budget=budget, home=home, zdr=zdr,
+                                        search=search)
+        except SearchError as e:
+            runs.pop(run.id, None)
+            raise HTTPException(400, f"Search provider error: {e}") from e
 
         def work():
             try:
@@ -317,7 +324,8 @@ def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = Fal
 
 
 def serve(db: str, home: Path, host: str = "127.0.0.1", port: int = 8000,
-          zdr: bool = False) -> None:
+          zdr: bool = False, search: str = "anthropic") -> None:
     import uvicorn
 
-    uvicorn.run(create_app(Store(db), home, zdr=zdr), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(Store(db), home, zdr=zdr, search=search), host=host, port=port,
+                log_level="warning")
