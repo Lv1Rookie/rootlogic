@@ -1,3 +1,4 @@
+import pytest
 from types import SimpleNamespace
 
 from rootlogic.llm import AnthropicLLM, Usage, json_schema
@@ -101,3 +102,27 @@ def test_default_mode_keeps_dynamic_filtering():
     tools = _tools_for(zdr=False)
     assert "allowed_callers" not in tools["web_search"]
     assert "allowed_callers" not in tools["web_fetch"]
+
+
+def test_bad_api_key_gives_a_clear_message_not_a_traceback(tmp_path, capsys):
+    """A wrong key is a setup problem: the CLI should explain it and exit non-zero."""
+    import anthropic
+
+    from rootlogic.cli import main
+    from rootlogic.llm import AuthError
+
+    class Rejecting:
+        def create(self, **kw):
+            raise anthropic.AuthenticationError(
+                "invalid", response=SimpleNamespace(status_code=401, headers={},
+                                                    request=None), body=None)
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=Rejecting()))
+    llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
+    with pytest.raises(AuthError, match="console.anthropic.com"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+    # sanity: the offline path still works (a clear topic, so nothing waits on stdin)
+    code = main(["--db", str(tmp_path / "x.db"), "--", "research", "--offline", "-y",
+                 "impact of generative AI on newsrooms"])
+    assert code == 0

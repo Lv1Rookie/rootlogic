@@ -26,7 +26,7 @@ from typing import TypeVar
 import openai
 from pydantic import BaseModel, ValidationError
 
-from .llm import AgentRefusal, LLMError, Usage, UsageSink, json_schema
+from .llm import AgentRefusal, AuthError, LLMError, Usage, UsageSink, json_schema
 from .models import SearchHit
 from .search import SearchProvider
 from .tools import NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
@@ -61,6 +61,9 @@ class OpenAICompatibleLLM:
             raise LLMError(f"network error during {purpose}: {e}") from e
         except openai.RateLimitError as e:
             raise LLMError(f"rate limited during {purpose}; try again shortly") from e
+        except openai.AuthenticationError as e:
+            raise AuthError("The API key was rejected. Check OPENAI_API_KEY (or --base-url for "
+                            "a local server, which usually needs no key).") from e
         except openai.APIStatusError as e:
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
 

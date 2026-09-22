@@ -75,6 +75,10 @@ class LLMError(RuntimeError):
     pass
 
 
+class AuthError(LLMError):
+    """Missing or wrong credentials: a setup problem, not a research failure."""
+
+
 class LLM(Protocol):
     def structured(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                    effort: str = "high") -> T: ...
@@ -118,6 +122,13 @@ class AnthropicLLM:
             raise LLMError(f"network error during {purpose}: {e}") from e
         except anthropic.RateLimitError as e:
             raise LLMError(f"rate limited during {purpose}; try again shortly") from e
+        except anthropic.AuthenticationError as e:
+            raise AuthError(
+                "Anthropic rejected the API key. Check ANTHROPIC_API_KEY holds a real key from "
+                "console.anthropic.com (it should be ~100 characters, not the 'sk-ant-...' "
+                "placeholder).") from e
+        except anthropic.PermissionDeniedError as e:
+            raise AuthError(f"This API key isn't allowed to do that: {e.message}") from e
         except anthropic.APIStatusError as e:
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
 

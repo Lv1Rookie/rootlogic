@@ -24,6 +24,7 @@ from .models import Plan, SubTaskDraft
 from .orchestrator import Budget, Orchestrator
 from .store import Store
 from .backend import Backend, BackendError, parse_prices
+from .llm import AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
 
 console = Console()
@@ -575,6 +576,12 @@ def main(argv: list[str] | None = None) -> int:
     except BackendError as e:
         console.print(f"[red]Invalid model settings:[/] {e}")
         return 2
+    except AuthError as e:
+        console.print(f"[red]Authentication problem:[/] {e}")
+        return 2
+    except LLMError as e:   # the session is already marked failed and logged
+        console.print(f"[red]Run failed:[/] {e}")
+        return 1
 
 
 if __name__ == "__main__":
