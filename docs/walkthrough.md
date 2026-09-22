@@ -186,7 +186,7 @@ check that:
 - The LangGraph engine resumes after a crash.
 - The web API round-trips questions, plan edits and overrides, and replays SSE.
 
-All 48 tests run in under a second with no internet.
+All 51 tests run in under a second with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 

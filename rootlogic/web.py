@@ -167,7 +167,7 @@ class ResumeRun(BaseModel):
 # =================================================================== app
 
 
-def create_app(store: Store, home: Path, *, engine_factory=None) -> FastAPI:
+def create_app(store: Store, home: Path, *, engine_factory=None, zdr: bool = False) -> FastAPI:
     """``engine_factory(store, ui, engine=, offline=, budget=, home=)`` is injectable for tests."""
     if engine_factory is None:
         from .cli import create_engine as engine_factory
@@ -185,7 +185,7 @@ def create_app(store: Store, home: Path, *, engine_factory=None) -> FastAPI:
 
     def launch(run: Run, target: str, arg: str, budget: Budget) -> None:
         run.engine = engine_factory(store, WebInteraction(run), engine=run.engine_name,
-                                    offline=run.offline, budget=budget, home=home)
+                                    offline=run.offline, budget=budget, home=home, zdr=zdr)
 
         def work():
             try:
@@ -316,7 +316,8 @@ def create_app(store: Store, home: Path, *, engine_factory=None) -> FastAPI:
     return app
 
 
-def serve(db: str, home: Path, host: str = "127.0.0.1", port: int = 8000) -> None:
+def serve(db: str, home: Path, host: str = "127.0.0.1", port: int = 8000,
+          zdr: bool = False) -> None:
     import uvicorn
 
-    uvicorn.run(create_app(Store(db), home), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(Store(db), home, zdr=zdr), host=host, port=port, log_level="warning")

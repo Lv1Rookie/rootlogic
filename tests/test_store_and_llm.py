@@ -80,3 +80,24 @@ def test_research_loop_handles_pause_turn_and_collects_hits():
     assert sum(u.web_searches for u in usages) == 2
     tool_names = [t["name"] for t in messages.calls[0]["tools"]]
     assert tool_names == ["web_search", "web_fetch", "submit_findings"]
+
+
+def _tools_for(zdr):
+    messages = FakeMessages()
+    client = SimpleNamespace(beta=SimpleNamespace(messages=messages))
+    AnthropicLLM(lambda u: None, client=client, zdr=zdr).research(  # type: ignore[arg-type]
+        purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
+    return {t["name"]: t for t in messages.calls[0]["tools"]}
+
+
+def test_zdr_mode_disables_dynamic_filtering_on_web_tools():
+    tools = _tools_for(zdr=True)
+    assert tools["web_search"]["allowed_callers"] == ["direct"]
+    assert tools["web_fetch"]["allowed_callers"] == ["direct"]
+    assert "allowed_callers" not in tools["submit_findings"]
+
+
+def test_default_mode_keeps_dynamic_filtering():
+    tools = _tools_for(zdr=False)
+    assert "allowed_callers" not in tools["web_search"]
+    assert "allowed_callers" not in tools["web_fetch"]

@@ -158,7 +158,8 @@ class ResearchGraph:
         prior = self.store.recall(s["topic"], exclude=self.sid)
         if prior:
             self._emit("memory.recalled", f"Found {len(prior)} related past session(s): "
-                       + "; ".join(p["topic"] for p in prior))
+                       + "; ".join(p["topic"] for p in prior),
+                       sessions=[p["session_id"] for p in prior])
         return {"memory": prior, "rounds": 0, "findings": {}, "seen_urls": [], "status": "running"}
 
     def clarify(self, s: ResearchState) -> dict:
@@ -169,7 +170,8 @@ class ResearchGraph:
         if not c.needs_clarification or not c.questions:
             self._emit("clarify.skipped", f"Topic is clear enough: {c.reasoning}")
             return {"pending_questions": []}
-        self._emit("clarify.asking", f"Asking {len(c.questions[:3])} clarifying question(s)")
+        self._emit("clarify.asking", f"Asking {len(c.questions[:3])} clarifying question(s)",
+                   reasoning=c.reasoning)
         return {"pending_questions": c.questions[:3]}
 
     def ask_user(self, s: ResearchState) -> dict:
@@ -198,7 +200,8 @@ class ResearchGraph:
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
-        self._emit("plan.created", f"Plan: {len(plan.subtasks)} sub-tasks, {recency}")
+        self._emit("plan.created", f"Plan: {len(plan.subtasks)} sub-tasks, {recency}",
+                   objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
         return {"plan": plan.model_dump()}
 
     def review(self, s: ResearchState) -> Command:
@@ -237,7 +240,7 @@ class ResearchGraph:
         for t in wave:
             t.status = "running"
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
-            self._emit("task.started", f"[{t.id}] Researching: {t.question}")
+            self._emit("task.started", f"[{t.id}] Researching: {t.question}", task=t.id)
         if not wave and s.get("rounds", 0) >= self.budget.max_rounds:
             self._emit("loop.budget", f"Reflection budget reached ({s.get('rounds', 0)} rounds)")
         update.update({"plan": plan.model_dump(), "wave": [t.id for t in wave]})
@@ -270,7 +273,7 @@ class ResearchGraph:
             if "error" in item:
                 task.status = "failed"
                 self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin)
-                self._emit("task.failed", f"[{task.id}] Failed: {item['error']}")
+                self._emit("task.failed", f"[{task.id}] Failed: {item['error']}", task=task.id)
                 continue
             draft = FindingDraft.model_validate(item["draft"])
             hits = [SearchHit.model_validate(h) for h in item["hits"]]
@@ -279,7 +282,8 @@ class ResearchGraph:
                                  blocked_domains=self.blocked_domains)
             for url, reason in finding.dropped:
                 self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
-                self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}")
+                self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}",
+                           task=task.id)
             for src in finding.sources:
                 self.store.add_source(self.sid, task.id, src.url, title=src.title,
                                       published=src.published, credibility=src.credibility.level,
@@ -289,7 +293,8 @@ class ResearchGraph:
             self.store.upsert_task(self.sid, task.id, task.question, task.status, task.origin,
                                    finding.model_dump_json())
             self._emit("task.done", f"[{task.id}] Done: {len(finding.sources)} sources kept, "
-                                    f"{len(finding.dropped)} dropped, confidence {draft.confidence}")
+                                    f"{len(finding.dropped)} dropped, confidence {draft.confidence}",
+                       task=task.id, searched=len(hits))
         self.store.update_session(self.sid, plan_json=plan.model_dump_json())
         return {"raw": None, "plan": plan.model_dump(), "findings": findings,
                 "seen_urls": sorted(seen), "wave": []}
@@ -301,7 +306,8 @@ class ResearchGraph:
         r = self.llm.structured(purpose="reflect", system=prompts.CRITIC, schema=Reflection,
                                 prompt=ctx.progress_block(plan, self._findings(s),
                                                           s.get("context", [])))
-        self._emit("reflect.done", ("Sufficient. " if r.sufficient else "Gaps found. ") + r.reasoning)
+        self._emit("reflect.done", ("Sufficient. " if r.sufficient else "Gaps found. ") + r.reasoning,
+                   new_tasks=len(r.new_subtasks), questions=len(r.questions_for_user))
         room = self.budget.max_tasks - len(plan.subtasks)
         if r.new_subtasks and room <= 0:
             self._emit("loop.budget", f"Task cap ({self.budget.max_tasks}) reached; not adding more")
@@ -343,7 +349,7 @@ class ResearchGraph:
         usage = self.store.usage(self.sid)
         self._emit("session.done", f"Report saved to {path} · {usage['calls']} LLM calls · "
                                    f"{usage['input_tokens'] + usage['output_tokens']:,} tokens · "
-                                   f"${usage['cost_usd']:.2f}")
+                                   f"${usage['cost_usd']:.2f}", path=str(path))
         return {"status": "done", "report": {**s["report"], "full": report.model_dump()}}
 
     # ================================================================== helpers
@@ -358,7 +364,7 @@ class ResearchGraph:
                 continue
             t = plan.add(d, origin)
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
-            self._emit("task.added", f"[{t.id}] Added ({origin}): {t.question}")
+            self._emit("task.added", f"[{t.id}] Added ({origin}): {t.question}", task=t.id)
             added.append(t)
         return added
 
@@ -393,10 +399,10 @@ class ResearchGraph:
             update["context"] = notes
         return update
 
-    def _emit(self, type_: str, message: str) -> None:
+    def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
-            self.store.add_event(self.sid, type_, message)
-        self.ui.on_event(Event(type=type_, message=message))
+            self.store.add_event(self.sid, type_, message, data or None)
+        self.ui.on_event(Event(type=type_, message=message, data=data))
 
     # ================================================================== driving the graph
     def _config(self) -> dict:

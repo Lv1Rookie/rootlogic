@@ -129,7 +129,7 @@ def show_plan(plan: Plan) -> None:
 
 
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
-                  budget: Budget | None = None, home: Path = HOME):
+                  budget: Budget | None = None, home: Path = HOME, zdr: bool = False):
     """Construct an engine with usage accounting wired to the store.
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
@@ -148,7 +148,7 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
         llm = FakeLLM(usage_sink)
     else:
         from .llm import AnthropicLLM
-        llm = AnthropicLLM(usage_sink)
+        llm = AnthropicLLM(usage_sink, zdr=zdr)
 
     if engine == "graph":
         from .graph import ResearchGraph
@@ -165,7 +165,8 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
                     verbose=getattr(args, "verbose", False))
     budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
                     max_parallel=args.parallel, max_searches=args.searches)
-    eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget)
+    eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget,
+                        zdr=getattr(args, "zdr", False))
     install_pause_handler(eng, ui)
     return eng
 
@@ -224,7 +225,7 @@ def cmd_web(args: argparse.Namespace, store: Store) -> int:
         console.print("[yellow]Warning: the web UI has no authentication and spends your API "
                       "credits. Only expose it on a network you trust.[/]")
     console.print(f"rootlogic web UI → http://{args.host}:{args.port}  (Ctrl-C to stop)")
-    serve(args.db, HOME, host=args.host, port=args.port)
+    serve(args.db, HOME, host=args.host, port=args.port, zdr=args.zdr)
     return 0
 
 
@@ -305,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--max-tasks", type=int, default=10)
     r.add_argument("--parallel", type=int, default=4)
     r.add_argument("--searches", type=int, default=5, help="web searches per sub-agent")
+    r.add_argument("--zdr", action="store_true",
+                   help="Zero Data Retention: web tools without dynamic filtering")
     r.add_argument("--engine", choices=["loop", "graph"], default="loop",
                    help="loop: hand-rolled orchestrator · graph: LangGraph (resumable)")
     r.set_defaults(fn=cmd_research)
@@ -312,11 +315,15 @@ def main(argv: list[str] | None = None) -> int:
     rs = sub.add_parser("resume", help="continue a --engine graph session from its checkpoint")
     rs.add_argument("session")
     rs.add_argument("--offline", action="store_true")
+    rs.add_argument("--zdr", action="store_true",
+                    help="Zero Data Retention: web tools without dynamic filtering")
     rs.set_defaults(fn=cmd_resume, rounds=2, max_tasks=10, parallel=4, searches=5)
 
     w = sub.add_parser("web", help="start the web UI (FastAPI + SSE)")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", type=int, default=8000)
+    w.add_argument("--zdr", action="store_true",
+                   help="Zero Data Retention: web tools without dynamic filtering")
     w.set_defaults(fn=cmd_web)
 
     gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")

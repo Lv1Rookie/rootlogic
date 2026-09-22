@@ -81,10 +81,14 @@ def json_schema(model: type[BaseModel]) -> dict:
 
 class AnthropicLLM:
     def __init__(self, usage_sink: UsageSink, *, model: str = MODEL,
-                 client: anthropic.Anthropic | None = None):
+                 client: anthropic.Anthropic | None = None, zdr: bool = False):
+        """``zdr=True`` makes the web tools Zero-Data-Retention eligible by setting
+        ``allowed_callers: ["direct"]``. That turns off dynamic filtering (Claude pre-filtering
+        search results in code), which usually costs more context tokens, so it is opt-in."""
         self.client = client or anthropic.Anthropic()
         self.model = model
         self.usage_sink = usage_sink
+        self.zdr = zdr
 
     # ------------------------------------------------------------------ plumbing
     def _create(self, purpose: str, **kwargs):
@@ -141,9 +145,15 @@ class AnthropicLLM:
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 5) -> tuple[T, list[SearchHit]]:
-        tools = [
+        web_tools = [
             {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
             {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 3},
+        ]
+        if self.zdr:
+            for t in web_tools:
+                t["allowed_callers"] = ["direct"]
+        tools = [
+            *web_tools,
             {
                 "name": "submit_findings",
                 "description": "Submit your final, source-backed findings for this sub-task. "
