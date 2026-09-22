@@ -1,4 +1,4 @@
-# rootlogic
+# rootlogic assignment - AI Agentic Personal Research Assistant
 
 An agentic **personal research assistant** for journalists, analysts and students.
 Give it a topic; it asks clarifying questions if needed, drafts a research plan you can
