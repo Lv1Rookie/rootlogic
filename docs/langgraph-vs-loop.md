@@ -4,8 +4,8 @@ rootlogic ships the same research agent twice so the trade-off can be seen in co
 
 | | `--engine loop` (default) | `--engine graph` |
 |---|---|---|
-| File | [`rootlogic/orchestrator.py`](../rootlogic/orchestrator.py) (~320 lines) | [`rootlogic/graph.py`](../rootlogic/graph.py) (~460 lines) |
-| Control flow | A Python `while` loop calling stage methods | A `StateGraph`: 11 nodes plus conditional edges |
+| File | [`rootlogic/orchestrator.py`](../rootlogic/orchestrator.py) (~420 lines) | [`rootlogic/graph.py`](../rootlogic/graph.py) (~580 lines) |
+| Control flow | A Python `while` loop calling stage methods | A `StateGraph`: 12 nodes plus conditional edges |
 | Parallel sub-agents | `ThreadPoolExecutor` | `Send("research", …)` fan-out, merged by a state reducer |
 | Human decisions | `ui.ask()` / `ui.review_plan()` block the loop | `interrupt()`: a persisted pause that the runner answers with `Command(resume=…)` |
 | Mid-run override (Ctrl-C) | Pause flag checked between waves | Same flag, which triggers an `interrupt()` inside `dispatch` |
@@ -27,21 +27,22 @@ graph TD;
     clarify -.clear.-> plan
     ask_user -.before plan.-> plan
     ask_user -.mid-run.-> dispatch
-    ask_user -.done.-> analyze
+    ask_user -.done.-> verify
     plan --> review
     review -.approved.-> dispatch
     review -.rejected.-> END([end])
     dispatch -.Send × N.-> research --> collect --> dispatch
     dispatch -.nothing ready.-> reflect
-    dispatch -.stop / budget.-> analyze
+    dispatch -.stop / budget.-> verify
     dispatch -.abort.-> END
     reflect -.new tasks.-> dispatch
     reflect -.question.-> ask_user
-    reflect -.sufficient.-> analyze
-    analyze --> write --> END
+    reflect -.sufficient.-> verify
+    verify --> analyze --> write --> END
 ```
 
-Regenerate it from the code with `rootlogic graph`.
+Regenerate it from the code with `rootlogic graph`. The `verify` node (claim verification and
+corroboration) was added with the guardrails; both engines run it.
 
 ## What LangGraph gave us for free
 
@@ -68,7 +69,7 @@ Regenerate it from the code with `rootlogic graph`.
    an accumulate-then-clear reducer (`_raw_reducer`) that `collect` resets by writing `None`.
 4. **Library quirks.** `Command(resume=None)` crashes inside LangGraph 1.2.12, because it treats
    `None` as "no resume value". Plan rejection therefore resumes with `{"approved": False}`.
-5. **More code.** About 460 lines vs 320 for the same behaviour. The graph wiring and state
+5. **More code.** About 580 lines vs 420 for the same behaviour. The graph wiring and state
    bookkeeping are the difference.
 
 ## Which to present

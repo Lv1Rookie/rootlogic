@@ -28,7 +28,7 @@ Every line of the assignment PDF was mapped to a feature before any code was wri
 | Assignment says | Feature built |
 |---|---|
 | Break topic into sub-tasks, sequence them | Planner → list of sub-tasks with dependencies |
-| Search online, filter outdated/irrelevant | Research workers with web search + source filter rules |
+| Search online, filter outdated/irrelevant | Research workers with web search + source filter rules; later, claims checked against their cited pages, corroboration labels and user source rules (Step 18) |
 | Ask clarifying questions, adapt | Clarify step before planning; reflect step during the run |
 | Summaries per source (bonus) | Each source gets a summary and key takeaways |
 | Long-term memory (bonus) | Past sessions feed new plans and suggest topics; a learned user profile; follow-up threads that build on earlier findings |
@@ -47,8 +47,12 @@ You → Clarify → Plan → [you approve] → Workers research in parallel
                                           ↓
                           Filter sources → Reflect: enough?
                              ↑  no: add tasks / ask you  ↓ yes
-                             └──────────────   Analyze contradictions → Write report → Save to memory
+                             └──────────────   Verify claims → Analyze contradictions
+                                                  → Write report → Check report → Save to memory
 ```
+
+The two checking steps (verify claims, check report) were added last, in Step 18; the rest is
+the original design.
 
 - The **orchestrator** is the manager. It holds the plan and decides what runs next.
 - The **workers** (subagents) each research one question with their own clean context. They
@@ -129,10 +133,14 @@ This is the heart of the project. `run()` reads top to bottom like a recipe:
    - When nothing is left to run, **reflect**: is this enough? If not, add follow-up tasks
      or ask the user something.
    - Stop when sufficient or when the budget runs out.
-6. **Analyze:** find what sources agree on and where they contradict each other.
-7. **Write:** produce a Markdown report with numbered citations and save it to memory.
+6. **Verify** (added in Step 18): check claims against the text of their cited pages and
+   label how well each is corroborated.
+7. **Analyze:** find what sources agree on and where they contradict each other.
+8. **Write:** produce a Markdown report with numbered citations, run code checks on it (bad
+   citations, uncited statements), and save it to memory.
 
-A `Budget` caps reflection rounds, total tasks, parallel workers and searches per worker.
+A `Budget` caps reflection rounds, total tasks, parallel workers, searches per worker and, since
+Step 18, how many claims get verified.
 Without caps, an agent can loop forever and run up a large bill.
 
 The text each role sees (topic, findings, sources, progress) is built by pure functions in
@@ -146,6 +154,9 @@ Every drop is logged with a reason, for example "outdated (2019-01-01 < 2025-09-
 
 **Why:** rules written in code are predictable, testable and easy to explain. Low-credibility
 sources are *kept but flagged*, so a dissenting view isn't silently hidden.
+
+Step 18 extends this file with the user's own **source rules** (block, allow-only, trust,
+distrust), applied the same way: code decides, and every drop has a reason.
 
 ## Step 8: Human in the loop → [`control.py`](../rootlogic/control.py)
 
@@ -260,6 +271,10 @@ nothing with side effects may run before an `interrupt()` in the same step (beca
 step re-runs on resume). The full comparison is in
 [langgraph-vs-loop.md](langgraph-vs-loop.md).
 
+Every later feature was built for **both** engines. In the graph, that meant new state fields
+and, for Step 18, a new `verify` node between research and analysis. `rootlogic graph` prints
+the current diagram.
+
 ## Step 14: A web UI → [`web.py`](../rootlogic/web.py) + [`static/index.html`](../rootlogic/static/index.html)
 
 `rootlogic web` starts a FastAPI server. The design reuses Step 8's idea: the web UI is just
@@ -276,8 +291,11 @@ another implementation of `Interaction`.
   replays the stream, and rebuilds the page.
 - The page is one HTML file with plain JavaScript (no build step). Report Markdown is
   sanitized before display, because it originates from web content.
-- Later additions: a **Your profile** panel in the sidebar, and a **Continue this research**
-  box on finished sessions (both Step 16).
+- Later additions:
+  - A **Your profile** panel in the sidebar and a **Continue this research** box on finished
+    sessions (Step 16).
+  - A **Source rules** panel and a **Verify claims** toggle (Step 18).
+  - Reports now show the **Confidence and limitations** section and the **Claim check** table.
 
 Testing it in a real browser caught two bugs the unit tests missed:
 - A new task could reuse an existing id after the user dropped one. `Plan.next_id()` now
@@ -401,6 +419,13 @@ A new **verify** stage runs between research and analysis in both engines:
 `rootlogic eval` scores every run the same way and saves a JSON file. `--baseline` compares two
 runs, so "the guardrail helped" becomes a number.
 
+Two design decisions worth explaining:
+- **Checks that fail never turn into passes.** If the verifier call errors, its claims stay
+  "unchecked"; they're never marked supported by default.
+- **Turning verification off is visible.** With `--no-verify`, corroboration labels (free,
+  pure code) are still computed and every claim is marked "unchecked", so the report says
+  verification didn't happen instead of staying silent. A test caught the silent version.
+
 Honest limits to explain in a demo:
 - Verification proves a claim matches its source, not that the source is right.
 - Unverifiable claims are common when subagents don't fetch pages.
@@ -415,8 +440,12 @@ Every change went through the same routine:
 2. Ran the offline demo, and for UI work, used it in a real browser. The first demo caught
    Rich hiding `[t1]` as a formatting tag. The browser caught the duplicate task ids and the
    orphaned "running" sessions.
-3. Checked external facts (API shapes, pricing, protocol versions) against official docs.
-4. Committed with a message explaining *why*, and pushed to GitHub.
+3. Checked external facts (API shapes, pricing, protocol versions) against official docs. For
+   the OpenAI adapter, that meant reading the installed SDK's own types, not relying on memory.
+4. For the guardrails, ran the evaluation harness offline to confirm it **fails** cases it
+   should fail (the fake model knows no facts), then checked in the browser that a distrust
+   rule visibly changes a report's corroboration labels.
+5. Committed with a message explaining *why*, and pushed to GitHub.
 
 ---
 
