@@ -126,3 +126,23 @@ def test_bad_api_key_gives_a_clear_message_not_a_traceback(tmp_path, capsys):
     code = main(["--db", str(tmp_path / "x.db"), "--", "research", "--offline", "-y",
                  "impact of generative AI on newsrooms"])
     assert code == 0
+
+
+def test_out_of_credits_is_explained_not_dumped_as_json():
+    """A billing 400 is a setup problem: say what to do, don't print the raw error body."""
+    import anthropic
+
+    from rootlogic.llm import AuthError
+
+    class Broke:
+        def create(self, **kw):
+            raise anthropic.BadRequestError(
+                "Your credit balance is too low to access the Anthropic API.",
+                response=SimpleNamespace(status_code=400, headers={}, request=None),
+                body={"error": {"message": "Your credit balance is too low to access the "
+                                           "Anthropic API."}})
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=Broke()))
+    llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
+    with pytest.raises(AuthError, match="Plans & Billing"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)

@@ -65,6 +65,9 @@ class OpenAICompatibleLLM:
             raise AuthError("The API key was rejected. Check OPENAI_API_KEY (or --base-url for "
                             "a local server, which usually needs no key).") from e
         except openai.APIStatusError as e:
+            if "quota" in (e.message or "").lower() or "billing" in (e.message or "").lower():
+                raise AuthError(f"The model provider rejected the request for billing reasons: "
+                                f"{e.message}") from e
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
 
         u = response.usage

@@ -76,7 +76,7 @@ class LLMError(RuntimeError):
 
 
 class AuthError(LLMError):
-    """Missing or wrong credentials: a setup problem, not a research failure."""
+    """Credentials or billing: a setup problem, not a research failure."""
 
 
 class LLM(Protocol):
@@ -130,6 +130,11 @@ class AnthropicLLM:
         except anthropic.PermissionDeniedError as e:
             raise AuthError(f"This API key isn't allowed to do that: {e.message}") from e
         except anthropic.APIStatusError as e:
+            if "credit balance" in (e.message or "").lower():
+                raise AuthError(
+                    "The Anthropic API account is out of credits. Add credits at "
+                    "console.anthropic.com under Plans & Billing. (API usage is billed "
+                    "separately from a Claude.ai Pro or Max subscription.)") from e
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
 
         u = response.usage
