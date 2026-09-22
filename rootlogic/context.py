@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from .filters import fill_dates_from_hits, filter_sources, normalize_url
+from .filters import SourcePolicy, fill_dates_from_hits, filter_sources, normalize_url
+from .verify import claim_label
 from .models import Finding, FindingDraft, Plan, SearchHit, SourceDraft, SubTask
 
 
@@ -78,23 +79,36 @@ def findings_block(plan: Plan, findings: list[Finding], context: list[str]) -> s
         lines.append(f"[{i}] {s.title} — {s.publisher}, {s.published}, credibility "
                      f"{s.credibility.level}: {s.summary}")
     lines.append("\nFindings:")
+    failed: list[str] = []
     for f in findings:
         lines.append(f"\n## {f.question} (confidence {f.confidence})\n{f.answer}")
-        for c in f.claims:
+        checks = f.checks or [None] * len(f.claims)
+        for c, check in zip(f.claims, checks):
             refs = sorted({index[k] for u in c.source_urls if (k := normalize_url(u)) in index})
+            cite = "".join(f"[{r}]" for r in refs)
+            if check is not None and check.verdict == "unsupported":
+                failed.append(f"- {c.text} {cite} ({check.note})")
+                continue
             if refs:
-                lines.append(f"- {c.text} " + "".join(f"[{r}]" for r in refs))
+                label = claim_label(check) if check is not None else ""
+                lines.append(f"- {c.text} {cite}" + (f" ({label})" if label else ""))
         if f.gaps:
             lines.append("Gaps: " + "; ".join(f.gaps))
+    if failed:
+        lines.append("\nClaims that FAILED verification (their cited pages don't support them; "
+                     "do not present as fact):")
+        lines += failed
     return "\n".join(lines)
 
 
 def curate(task: SubTask, draft: FindingDraft, hits: list[SearchHit], *, recency_days: int,
-           today: date, seen_urls: set[str], blocked_domains: tuple[str, ...] = ()) -> Finding:
+           today: date, seen_urls: set[str], blocked_domains: tuple[str, ...] = (),
+           policy: SourcePolicy | None = None) -> Finding:
     """Apply source filters to a worker's raw output. Mutates ``seen_urls``."""
     fill_dates_from_hits(draft.sources, hits)
     kept, dropped = filter_sources(draft.sources, recency_days=recency_days, today=today,
-                                   seen_urls=seen_urls, blocked_domains=blocked_domains)
+                                   seen_urls=seen_urls, blocked_domains=blocked_domains,
+                                   policy=policy)
     return Finding(task_id=task.id, question=task.question, answer=draft.answer, sources=kept,
                    claims=draft.claims, gaps=draft.gaps, confidence=draft.confidence,
                    dropped=dropped)

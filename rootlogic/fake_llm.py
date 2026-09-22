@@ -13,9 +13,10 @@ from typing import Callable, TypeVar
 from pydantic import BaseModel
 
 from .llm import Usage, UsageSink
-from .models import (Analysis, ClaimDraft, Clarification, Contradiction, Credibility,
-                     FindingDraft, PlanDraft, Preference, ProfileUpdate, Reflection, ReportDraft,
-                     SearchHit, SourceDraft, SubTaskDraft)
+from .models import (Analysis, ClaimDraft, ClaimVerdictDraft, Clarification, Contradiction,
+                     Credibility, FindingDraft, HoaxJudgement, PlanDraft, Preference,
+                     ProfileUpdate, Reflection, ReportDraft, SearchHit, SourceDraft, SubTaskDraft,
+                     VerificationDraft)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -101,6 +102,24 @@ def default_profile(prompt: str) -> ProfileUpdate:
                               for s in said])
 
 
+PRIMARY_PAGE = ("Annual data release. Figures rose year over year in every region we track, "
+                "driven by adoption in mid-sized organisations. Methodology and caveats follow.")
+
+
+def default_verification(prompt: str) -> VerificationDraft:
+    """Supports each claim with the first sentence of its evidence (a real verbatim quote)."""
+    checks = []
+    for m in re.finditer(r"Claim (\d+): .*?\n<<<\n(.*?)\n>>>", prompt, re.S):
+        quote = m.group(2).split(". ")[0][:120]
+        checks.append(ClaimVerdictDraft(claim_number=int(m.group(1)), verdict="supported",
+                                        quote=quote, note="Evidence states it."))
+    return VerificationDraft(checks=checks)
+
+
+def default_hoax_judgement(prompt: str) -> HoaxJudgement:
+    return HoaxJudgement(asserted=False, reasoning="offline demo")
+
+
 def default_report(prompt: str) -> ReportDraft:
     t = _topic(prompt)
     return ReportDraft(
@@ -121,7 +140,8 @@ class FakeLLM:
         self.handlers = {Clarification: default_clarify, PlanDraft: default_plan,
                          Reflection: default_reflect, Analysis: default_analysis,
                          ReportDraft: default_report, ProfileUpdate: default_profile,
-                         **(handlers or {})}
+                         VerificationDraft: default_verification,
+                         HoaxJudgement: default_hoax_judgement, **(handlers or {})}
         self.calls: list[tuple[str, str]] = []  # (purpose, prompt)
         self._n = 0
         self._lock = threading.Lock()
@@ -147,4 +167,7 @@ class FakeLLM:
         handler = self.handlers.get(schema)
         finding = handler(prompt) if handler else default_finding(prompt, n)
         hits = [SearchHit(url=s.url, title=s.title, page_age=s.published) for s in finding.sources]
+        if finding.sources:  # the sub-agent "fetched" its primary source: evidence to verify
+            hits.append(SearchHit(url=finding.sources[0].url, title=finding.sources[0].title,
+                                  text=PRIMARY_PAGE))
         return finding, hits  # type: ignore[return-value]

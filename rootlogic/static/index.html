@@ -150,6 +150,20 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
     </div>
 
     <div>
+      <h2>Source rules</h2>
+      <div id="rules" class="stack" style="gap:0"></div>
+      <form id="rule-add" class="row" style="margin-top:6px">
+        <input type="text" id="rule-domain" style="flex:1;min-width:0" placeholder="e.g. who.int">
+        <select id="rule-kind" style="width:auto" aria-label="Rule">
+          <option value="trust">trust</option><option value="distrust">distrust</option>
+          <option value="block">block</option><option value="allow">only</option>
+        </select>
+        <button class="btn small" type="submit">Add</button>
+      </form>
+      <label class="inline" style="margin-top:6px"><input type="checkbox" id="verify" checked> Verify claims against sources</label>
+    </div>
+
+    <div>
       <h2>History</h2>
       <div id="history" class="list"><div class="meta">No sessions yet.</div></div>
     </div>
@@ -468,7 +482,8 @@ async function openSession(sid) {
 async function startRun(topic, parent = null) {
   const run = await api("/api/runs", { method: "POST",
     body: { topic, engine: $("#engine").value, offline: $("#offline").checked,
-            use_profile: $("#use-profile").checked, parent_session: parent } });
+            use_profile: $("#use-profile").checked, parent_session: parent,
+            verify_claims: $("#verify").checked ? 12 : 0 } });
   resetView(topic);
   state.run = run.run_id; setStatus("running");
   if (parent) $("#v-meta").textContent = "follow-up of " + parent;
@@ -485,6 +500,31 @@ $("#continue").onsubmit = async e => {
   const q = $("#continue-text").value.trim();
   if (!q || !state.sid) return;
   try { await startRun(q, state.sid); $("#continue-text").value = ""; } catch (err) { alert(err.message); }
+};
+
+// ------------------------------------------------------------------ source rules
+const RULE_TEXT = { block: "blocked", allow: "only these", trust: "trusted", distrust: "unreliable" };
+async function loadRules() {
+  const { rules } = await api("/api/sources");
+  const box = $("#rules");
+  box.innerHTML = rules.length ? "" :
+    `<div class="meta">None. Trust, distrust or block sites, or allow only some.</div>`;
+  for (const r of rules) {
+    const row = document.createElement("div");
+    row.className = "pref";
+    row.innerHTML = `<div><div class="cat">${esc(RULE_TEXT[r.rule])}</div>${esc(r.domain)}</div>
+      <button class="x" type="button" title="Remove rule" aria-label="Remove rule for ${esc(r.domain)}">×</button>`;
+    $(".x", row).onclick = async () => { await api(`/api/sources/${encodeURIComponent(r.domain)}`, { method: "DELETE" }); loadRules(); };
+    box.appendChild(row);
+  }
+}
+$("#rule-add").onsubmit = async e => {
+  e.preventDefault();
+  const domain = $("#rule-domain").value.trim();
+  if (!domain) return;
+  try { await api("/api/sources", { method: "POST", body: { domain, rule: $("#rule-kind").value } });
+        $("#rule-domain").value = ""; loadRules(); }
+  catch (err) { alert(err.message); }
 };
 
 // ------------------------------------------------------------------ profile
@@ -526,7 +566,7 @@ $("#forget").onclick = async () => {
 };
 
 // Remember engine/offline choices (per-browser convenience only).
-for (const [id, prop] of [["engine", "value"], ["offline", "checked"], ["use-profile", "checked"]]) {
+for (const [id, prop] of [["engine", "value"], ["offline", "checked"], ["use-profile", "checked"], ["verify", "checked"]]) {
   try { const v = localStorage.getItem("rootlogic." + id); if (v !== null) $("#" + id)[prop] = JSON.parse(v); } catch {}
   $("#" + id).addEventListener("change", e => {
     try { localStorage.setItem("rootlogic." + id, JSON.stringify(e.target[prop])); } catch {}
@@ -535,7 +575,7 @@ for (const [id, prop] of [["engine", "value"], ["offline", "checked"], ["use-pro
 
 // Re-attach to a live run after a page refresh.
 (async () => {
-  await Promise.all([loadHistory(), loadProfile()]);
+  await Promise.all([loadHistory(), loadProfile(), loadRules()]);
   const live = (await api("/api/runs")).filter(r => r.status === "running").pop();
   if (live) { resetView(live.topic); state.run = live.run_id; setStatus("running"); follow(live.run_id); }
 })();

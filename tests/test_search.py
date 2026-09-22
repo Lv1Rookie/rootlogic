@@ -122,7 +122,9 @@ def test_client_tools_loop_searches_fetches_and_submits():
 
     assert finding.confidence == "medium"
     assert search.queries == [("q1", 90)] and search.fetched == ["https://a.com/r"]
-    assert [(h.url, h.page_age) for h in hits] == [("https://a.com/r", "2026-07-01")]
+    assert [(h.url, h.page_age) for h in hits if h.text is None] == [("https://a.com/r",
+                                                                     "2026-07-01")]
+    assert [(h.url, h.text) for h in hits if h.text] == [("https://a.com/r", "full text")]
     # no Anthropic server tools in the portable path
     tools = messages.calls[0]["tools"]
     assert [t["name"] for t in tools] == ["web_search", "web_fetch", "submit_findings"]

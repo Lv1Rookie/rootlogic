@@ -20,7 +20,7 @@ import anthropic
 from pydantic import BaseModel
 
 from .models import SearchHit
-from .search import SearchProvider
+from .search import SearchProvider, clip
 from .tools import MAX_FETCHES, NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
 
 T = TypeVar("T", bound=BaseModel)
@@ -239,8 +239,13 @@ class AnthropicLLM:
 
 
 def _search_hits(content) -> list[SearchHit]:
+    """Search results, plus fetched pages with their text (evidence for verification)."""
     hits = []
     for block in content:
+        if block.type == "web_fetch_tool_result":
+            if (page := _fetched_page(block.content)) is not None:
+                hits.append(page)
+            continue
         if block.type != "web_search_tool_result":
             continue
         results = block.content
@@ -252,3 +257,15 @@ def _search_hits(content) -> list[SearchHit]:
                 hits.append(SearchHit(url=url, title=getattr(r, "title", "") or "",
                                       page_age=getattr(r, "page_age", None)))
     return hits
+
+
+def _fetched_page(result) -> SearchHit | None:
+    """web_fetch_result -> document -> text source. Errors and non-text (PDF bytes) -> None."""
+    if getattr(result, "type", None) != "web_fetch_result":
+        return None
+    document = getattr(result, "content", None)
+    source = getattr(document, "source", None)
+    if getattr(source, "type", None) != "text" or not getattr(source, "data", None):
+        return None
+    return SearchHit(url=result.url, title=getattr(document, "title", None) or "",
+                     text=clip(source.data))

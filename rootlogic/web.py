@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from .backend import Backend, BackendError
 from .control import Command, Event
+from .filters import clean_domain
 from .models import Plan, SubTaskDraft
 from .orchestrator import Budget
 from .store import Store
@@ -158,6 +159,12 @@ class StartRun(BaseModel):
     max_tasks: int = Field(10, ge=1, le=20)
     parent_session: str | None = None   # follow up on this earlier session
     use_profile: bool = True
+    verify_claims: int = Field(12, ge=0, le=40)  # 0 disables claim verification
+
+
+class NewSourceRule(BaseModel):
+    domain: str = Field(min_length=3, max_length=200)
+    rule: Literal["block", "allow", "trust", "distrust"]
 
 
 class NewPreference(BaseModel):
@@ -238,7 +245,8 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
             raise HTTPException(404, "Unknown parent session")
         run = Run(body.topic.strip(), body.engine, body.offline, parent=body.parent_session)
         runs[run.id] = run
-        launch(run, "run", run.topic, Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks),
+        launch(run, "run", run.topic, Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks,
+                                             verify_claims=body.verify_claims),
                use_profile=body.use_profile, parent=body.parent_session)
         return run.summary()
 
@@ -330,6 +338,25 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         runs[run.id] = run
         launch(run, "resume", sid, Budget())
         return run.summary()
+
+    # ------------------------------------------------------------- source rules
+    @app.get("/api/sources")
+    def source_rules() -> dict:
+        return {"rules": store.source_rules()}
+
+    @app.post("/api/sources")
+    def set_source_rule(body: NewSourceRule) -> dict:
+        domain = clean_domain(body.domain)
+        if "." not in domain:
+            raise HTTPException(422, "Not a domain")
+        store.set_source_rule(domain, body.rule)
+        return {"rules": store.source_rules()}
+
+    @app.delete("/api/sources/{domain}")
+    def remove_source_rule(domain: str) -> dict:
+        if not store.remove_source_rule(clean_domain(domain)):
+            raise HTTPException(404, "No rule for that domain")
+        return {"rules": store.source_rules()}
 
     # ------------------------------------------------------------- profile
     @app.get("/api/profile")

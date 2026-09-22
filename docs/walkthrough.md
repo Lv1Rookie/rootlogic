@@ -75,6 +75,9 @@ Added later, each for a specific reason:
 | **Tavily** (optional) | Web search that doesn't depend on one LLM vendor | 15 |
 | **OpenAI SDK** (optional) | Run on GPT, local models (Ollama) or OpenRouter | 17 |
 
+Nothing new was needed for Step 18 (guardrails and evaluation): it's plain Python on top of the
+same interfaces.
+
 ## Step 4: Define the data shapes first → [`models.py`](../rootlogic/models.py)
 
 Before any logic, the project defines what each step produces:
@@ -156,7 +159,7 @@ calls an `Interaction` object for four things: `ask`, `review_plan`, `override` 
 
 ## Step 9: Storage → [`store.py`](../rootlogic/store.py)
 
-One SQLite file holds eight tables. All except `preferences` are keyed by session:
+One SQLite file holds nine tables. All except `preferences` and `source_rules` are keyed by session:
 
 | Table | What it holds |
 |---|---|
@@ -168,6 +171,7 @@ One SQLite file holds eight tables. All except `preferences` are keyed by sessio
 | `llm_calls` | tokens in/out, cache usage, web searches and dollar cost per call |
 | `memory_fts` | full-text search index over past sessions, which powers recall and topic suggestions |
 | `preferences` | the user's standing preferences (the learned profile, Step 16) |
+| `source_rules` | the user's block / allow / trust / distrust rules for websites (Step 18) |
 
 The LangGraph engine also saves its checkpoints in a second file, `checkpoints.db`. New columns
 are added to older databases automatically on startup, so an upgrade never loses history.
@@ -175,7 +179,8 @@ are added to older databases automatically on startup, so an upgrade never loses
 ## Step 10: Prompts → [`prompts.py`](../rootlogic/prompts.py)
 
 Each role has its own short instructions: clarifier, planner, researcher, critic, analyst,
-writer, and a profiler that extracts lasting user preferences (Step 16).
+writer, a profiler that extracts lasting user preferences (Step 16), a verifier and an
+evaluation judge (Step 18).
 Two details are worth knowing:
 
 - **Prompt-injection defense:** the researcher is told that web pages are *untrusted data*
@@ -203,9 +208,16 @@ check that:
   invalid JSON and the repair retry, tested against the `openai` SDK's own response types.
 - The profile is learned, used, edited and can be switched off.
 - Follow-ups reuse earlier findings, chain, and don't count earlier tasks against the budget.
+- Guardrails behave as designed:
+  - Invented quotes are downgraded.
+  - Claims without page text are "unverifiable".
+  - Corroboration labels are correct.
+  - Source rules block, allow and override credibility.
+  - Bad citations are fixed and uncited statements flagged.
+- The evaluation harness scores facts, hoaxes, contradictions, stale sources and refusals correctly.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 100 tests run in a few seconds with no internet.
+is added first. All 132 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -227,6 +239,11 @@ and `profile`. Useful flags on `research`:
 | `--zdr` | Zero Data Retention mode for Claude's web tools (Step 15) |
 | `--no-profile` | Doesn't use or update the learned profile for this run (Step 16) |
 | `--provider openai --model … [--base-url …]` | Runs on another model (Step 17) |
+| `--block` / `--only DOMAIN` | Source rules for one run (Step 18) |
+| `--verify-claims N` / `--no-verify` | How many claims to verify against their pages (Step 18) |
+
+Two more commands came with Step 18: `rootlogic sources` (manage website rules) and
+`rootlogic eval` (run the evaluation set).
 
 ## Step 13: A second engine with LangGraph → [`graph.py`](../rootlogic/graph.py)
 
@@ -345,7 +362,52 @@ rootlogic changes when you pass `--provider openai`.
 The adapter was written against the installed `openai` SDK's actual types, not from memory. Its
 tests replay real SDK response objects, so no network is needed.
 
-## Step 18: Check it, then publish
+## Step 18: Guardrails and proof → [`verify.py`](../rootlogic/verify.py) + [`evaluate.py`](../rootlogic/evaluate.py)
+
+The honest starting point: nothing earlier *ensured* reports were accurate, and nothing
+*measured* it. The tests proved the orchestration works, not that the answers are right. This
+step adds layers that check what can be checked, label what can't, and measure the result.
+
+A new **verify** stage runs between research and analysis in both engines:
+
+1. **Claim verification.**
+   - Pages the subagents fetched are kept as *evidence* (`SearchHit.text`). With our own search
+     tools, missing pages can also be fetched for the check.
+   - For each claim, the model is shown the most relevant parts of its cited pages. It says
+     supported, partially supported, or unsupported, and must quote the page **word for word**.
+   - **Code** then checks the quote is really in the page. If it isn't, "supported" becomes
+     "partially supported". This stops the verifier from inventing evidence.
+   - No page text means **unverifiable**, never assumed true. Failed claims are withheld from the
+     writer as fact.
+2. **Corroboration labels** (pure code): *corroborated* by 2+ independent sites, *single source*,
+   or *weak* (only low-credibility sources).
+3. **Source rules:** block, allowlist, trust or distrust sites. They're stored in the database,
+   applied by code, and also told to the agents so they search accordingly.
+4. **Report checks** (pure code): citations pointing at no source become `[?]`, and uncited
+   factual sentences and weakly sourced takeaways are listed. Every report ends with
+   **Confidence and limitations** and a **Claim check** table.
+
+**Proving it: the evaluation set.** Guardrails are only as good as their measured effect.
+[`evals/cases.json`](../evals/cases.json) has 20 cases, each targeting one failure:
+
+| Case kind | Pass condition |
+|---|---|
+| Known facts | Required keywords are present |
+| Hoaxes | A judge model confirms none is presented as true |
+| Contested questions | The analysis finds the disagreements |
+| Time-sensitive topics | Sources are mostly recent |
+| Harmful requests | The model refuses |
+
+`rootlogic eval` scores every run the same way and saves a JSON file. `--baseline` compares two
+runs, so "the guardrail helped" becomes a number.
+
+Honest limits to explain in a demo:
+- Verification proves a claim matches its source, not that the source is right.
+- Unverifiable claims are common when subagents don't fetch pages.
+- The hoax judge is a model too.
+- A live evaluation costs money.
+
+## Step 19: Check it, then publish
 
 Every change went through the same routine:
 
@@ -366,7 +428,7 @@ Every change went through the same routine:
    OpenAI-compatible adapter. Trying it free with Ollama is a good first test.
 2. **Read the code in this order:** `models.py` → `orchestrator.py` (start with `run()`) →
    `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → `tools.py` →
-   `openai_llm.py` → the tests → `graph.py` → `web.py`.
+   `openai_llm.py` → `verify.py` → `evaluate.py` → the tests → `graph.py` → `web.py`.
 3. **Rehearse the demo:**
    - A vague topic (shows clarifying questions).
    - Editing the plan.
@@ -375,6 +437,9 @@ Every change went through the same routine:
    - A second related topic (shows memory).
    - Answer a clarifying question, then run another topic: the profile is used and not re-asked.
    - `--follow-up <id>` (or "Continue this research"): only the new questions get researched.
+   - Show a report's **Confidence and limitations** and **Claim check** sections, then
+     `rootlogic sources distrust <site>` and run again: the labels change.
+   - `rootlogic eval --kind hoax --kind harmful` (live) to show the guardrails measured.
    - `--engine graph`: kill it mid-run, then `rootlogic resume <id>`.
    - `rootlogic web`: the same flow in the browser, including refresh mid-run.
 4. **Be ready to explain:**
@@ -387,6 +452,9 @@ Every change went through the same routine:
    - Why search sits behind its own interface, and what that means for swapping models.
    - How the profile and follow-ups make research improve over time, and how the user
      controls them.
+   - Which guardrails are model judgments and which are code, and why the verbatim-quote
+     check matters.
+   - What the evaluation proves and what it can't.
 
 For wider context, read the two research notes:
 

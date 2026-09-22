@@ -65,7 +65,8 @@ def test_full_run_produces_report_and_persists_everything(tmp_path):
     assert purposes[:2] == ["clarify", "plan"]
     assert sorted(p for p in purposes if p.startswith("research:")) == \
         ["research:t1", "research:t2", "research:t3"]
-    assert purposes[-3:] == ["reflect", "analyze", "report"]
+    stages = [p.split(":")[0] for p in purposes]
+    assert stages[-6:] == ["reflect", "verify", "verify", "verify", "analyze", "report"]
 
     s = store.session(orch.sid)
     assert s["status"] == "done"

@@ -198,3 +198,24 @@ def test_profile_api_and_follow_up_run(client):
 
     assert client.delete(f"/api/profile/{pref['id']}").json()["preferences"] == []
     assert client.delete(f"/api/profile/{pref['id']}").status_code == 404
+
+
+def test_source_rules_api(client):
+    assert client.get("/api/sources").json()["rules"] == []
+    rules = client.post("/api/sources", json={"domain": "https://www.WHO.int/x",
+                                              "rule": "trust"}).json()["rules"]
+    assert [(r["domain"], r["rule"]) for r in rules] == [("who.int", "trust")]
+    assert client.post("/api/sources", json={"domain": "nodots", "rule": "block"}).status_code == 422
+    assert client.post("/api/sources", json={"domain": "a.com", "rule": "nuke"}).status_code == 422
+    assert client.delete("/api/sources/who.int").json()["rules"] == []
+    assert client.delete("/api/sources/who.int").status_code == 404
+
+
+def test_run_can_disable_verification(client):
+    rid = client.post("/api/runs", json={"topic": TOPIC, "verify_claims": 0}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    wait(client, rid, finished)
+    types = [e["type"] for e in sse_events(client, rid)]
+    assert "verify.started" not in types and "report.checked" in types

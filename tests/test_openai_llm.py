@@ -129,7 +129,8 @@ def test_research_tool_loop_in_chat_completions_format():
 
     assert finding.confidence == "medium"
     assert search.queries == [("q", 30)] and search.fetched == ["https://a.com"]
-    assert [h.page_age for h in hits] == ["2026-08-01"]
+    assert [h.page_age for h in hits if h.text is None] == ["2026-08-01"]
+    assert [h.text for h in hits if h.text] == ["page text"]  # fetched page kept as evidence
     tools = api.calls[0]["tools"]
     assert [t["function"]["name"] for t in tools] == ["web_search", "web_fetch", "submit_findings"]
     assert all(t["type"] == "function" and t["function"]["strict"] for t in tools)

@@ -47,7 +47,8 @@ def test_full_run_matches_orchestrator_stages(tmp_path):
     assert p[:2] == ["clarify", "plan"]
     assert sorted(x for x in p if x.startswith("research:")) == \
         ["research:t1", "research:t2", "research:t3"]
-    assert p[-3:] == ["reflect", "analyze", "report"]
+    stages = [x.split(":")[0] for x in p]
+    assert stages[-6:] == ["reflect", "verify", "verify", "verify", "analyze", "report"]
     assert store.session(g.sid)["status"] == "done"
     dropped = [s for s in store.sources(g.sid) if not s["kept"]]
     assert dropped and all("outdated" in s["reason"] for s in dropped)

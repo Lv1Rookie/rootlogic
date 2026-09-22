@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS preferences ( -- the user's standing preferences (lon
     session_id TEXT,                   -- session it was learned from; NULL if added by hand
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_rules ( -- user's site rules: block | allow | trust | distrust
+    domain TEXT PRIMARY KEY,
+    rule TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
     session_id UNINDEXED, topic, summary, takeaways
 );
@@ -192,6 +197,10 @@ class Store:
             (sid, task_id, question, status, origin, finding_json),
         )
 
+    def update_finding(self, sid: str, task_id: str, finding_json: str) -> None:
+        self._exec("UPDATE tasks SET finding_json = ? WHERE session_id = ? AND task_id = ?",
+                   (finding_json, sid, task_id))
+
     def add_source(self, sid: str, task_id: str, url: str, *, title: str = "", published: str = "",
                    credibility: str = "", kept: bool, reason: str = "", data: str = "") -> None:
         self._exec(
@@ -252,6 +261,18 @@ class Store:
 
     def clear_preferences(self) -> int:
         return self._exec("DELETE FROM preferences").rowcount
+
+    # ------------------------------------------------------------------ source rules
+    def source_rules(self) -> list[dict[str, Any]]:
+        return self._all("SELECT * FROM source_rules ORDER BY rule, domain")
+
+    def set_source_rule(self, domain: str, rule: str) -> None:
+        """One rule per domain; setting a new rule replaces the old one."""
+        self._exec("INSERT INTO source_rules (domain, rule, created_at) VALUES (?,?,?) "
+                   "ON CONFLICT(domain) DO UPDATE SET rule = excluded.rule", (domain, rule, now()))
+
+    def remove_source_rule(self, domain: str) -> bool:
+        return self._exec("DELETE FROM source_rules WHERE domain = ?", (domain,)).rowcount > 0
 
     # ------------------------------------------------------------------ long-term memory
     def remember(self, sid: str, topic: str, summary: str, takeaways: list[str]) -> None:

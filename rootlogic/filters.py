@@ -8,10 +8,82 @@ logged with a reason.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
-from .models import SearchHit, SourceDraft
+from .models import Credibility, SearchHit, SourceDraft
+
+RULES = ("block", "allow", "trust", "distrust")
+
+
+def host_of(url: str) -> str:
+    return urlsplit(normalize_url(url)).netloc
+
+
+def domain_matches(host: str, domains) -> bool:
+    """True if host is one of ``domains`` or a subdomain of one."""
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
+def clean_domain(text: str) -> str:
+    """'https://www.Example.com/path' -> 'example.com'."""
+    text = text.strip().lower()
+    if "//" not in text:
+        text = "https://" + text
+    return urlsplit(text).netloc.removeprefix("www.")
+
+
+@dataclass(frozen=True)
+class SourcePolicy:
+    """The user's source rules. ``allowed`` non-empty means allowlist mode."""
+    blocked: frozenset[str] = field(default_factory=frozenset)
+    allowed: frozenset[str] = field(default_factory=frozenset)
+    trusted: frozenset[str] = field(default_factory=frozenset)
+    distrusted: frozenset[str] = field(default_factory=frozenset)
+
+    @classmethod
+    def from_rules(cls, rules: list[dict], *, block: tuple[str, ...] = (),
+                   only: tuple[str, ...] = ()) -> SourcePolicy:
+        by = {r: {x["domain"] for x in rules if x["rule"] == r} for r in RULES}
+        return cls(blocked=frozenset(by["block"] | {clean_domain(d) for d in block}),
+                   allowed=frozenset(by["allow"] | {clean_domain(d) for d in only}),
+                   trusted=frozenset(by["trust"]), distrusted=frozenset(by["distrust"]))
+
+    @property
+    def empty(self) -> bool:
+        return not (self.blocked or self.allowed or self.trusted or self.distrusted)
+
+    def describe(self) -> str:
+        """One context line for prompts, so sub-agents search accordingly."""
+        parts = []
+        if self.allowed:
+            parts.append("use ONLY these sites: " + ", ".join(sorted(self.allowed)))
+        if self.blocked:
+            parts.append("never use: " + ", ".join(sorted(self.blocked)))
+        if self.trusted:
+            parts.append("trusted: " + ", ".join(sorted(self.trusted)))
+        if self.distrusted:
+            parts.append("treat as unreliable: " + ", ".join(sorted(self.distrusted)))
+        return "User source rules: " + "; ".join(parts) if parts else ""
+
+    def verdict(self, url: str) -> str | None:
+        """Drop reason under this policy, or None to keep."""
+        host = host_of(url)
+        if domain_matches(host, self.blocked):
+            return f"blocked by your source rules ({host})"
+        if self.allowed and not domain_matches(host, self.allowed):
+            return f"not on your allowlist ({host})"
+        return None
+
+    def adjust(self, source: SourceDraft) -> None:
+        """Trusted/distrusted sites override the model's credibility rating."""
+        host = host_of(source.url)
+        if domain_matches(host, self.distrusted):
+            source.credibility = Credibility(level="low", reason="You marked this site unreliable")
+        elif domain_matches(host, self.trusted):
+            source.credibility = Credibility(level="high", reason="You marked this site trusted")
+
 
 _RELATIVE = re.compile(r"(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago", re.I)
 _UNIT_DAYS = {"minute": 0, "hour": 0, "day": 1, "week": 7, "month": 30, "year": 365}
@@ -62,11 +134,12 @@ def filter_sources(
     today: date,
     seen_urls: set[str] | None = None,
     blocked_domains: tuple[str, ...] = (),
+    policy: SourcePolicy | None = None,
 ) -> tuple[list[SourceDraft], list[tuple[str, str]]]:
     """Return (kept, dropped) where dropped is a list of (url, reason).
 
     Rules, in order:
-      1. blocked domain
+      1. blocked domain, or not on the allowlist (``policy``)
       2. duplicate (already seen this session or earlier in this list)
       3. low relevance
       4. older than ``recency_days`` (0 disables). Unknown dates are kept.
@@ -82,8 +155,11 @@ def filter_sources(
     for s in sources:
         key = normalize_url(s.url)
         host = urlsplit(key).netloc
-        if any(host == d or host.endswith("." + d) for d in blocked_domains):
+        if domain_matches(host, blocked_domains):
             dropped.append((s.url, f"blocked domain {host}"))
+            continue
+        if policy is not None and (reason := policy.verdict(s.url)):
+            dropped.append((s.url, reason))
             continue
         if key in seen:
             dropped.append((s.url, "duplicate"))
@@ -96,6 +172,8 @@ def filter_sources(
             if published is not None and published < cutoff:
                 dropped.append((s.url, f"outdated ({published.isoformat()} < {cutoff.isoformat()})"))
                 continue
+        if policy is not None:
+            policy.adjust(s)
         seen.add(key)
         kept.append(s)
     return kept, dropped

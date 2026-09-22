@@ -39,7 +39,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 
 from . import context as ctx
-from . import continuity
+from . import continuity, verify
+from .filters import SourcePolicy
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction
@@ -48,6 +49,10 @@ from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanD
                      Report, ReportDraft, SearchHit, SubTask, SubTaskDraft)
 from .orchestrator import Budget
 from .store import Store
+
+
+def _merge(current: dict | None, update: dict | None) -> dict:
+    return {**(current or {}), **(update or {})}
 
 
 def _raw_reducer(current: list[dict] | None, update: list[dict] | None) -> list[dict]:
@@ -76,13 +81,15 @@ class ResearchState(TypedDict, total=False):
     parent: str                                      # session this one follows up, if any
     previous_block: str                              # earlier findings shown to clarify/plan
     previous_tasks: list[dict]                       # earlier tasks, prepended to the plan
+    evidence: Annotated[dict[str, str], _merge]      # url -> fetched page text (verification)
+    policy_drops: Annotated[int, operator.add]       # sources removed by the user's rules
 
 
 class ResearchGraph:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, checkpoint_path: str | Path,
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
                  today: date | None = None, blocked_domains: tuple[str, ...] = (),
-                 use_profile: bool = True):
+                 use_profile: bool = True, source_policy: SourcePolicy | None = None):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -91,6 +98,7 @@ class ResearchGraph:
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
         self.use_profile = use_profile
+        self.source_policy = source_policy   # None: the user's saved rules, read when needed
         self.control = Control()
         self.sid = ""
         if str(checkpoint_path) != ":memory:":
@@ -110,18 +118,20 @@ class ResearchGraph:
         g.add_node("research", self.research)
         g.add_node("collect", self.collect)
         g.add_node("reflect", self.reflect)
+        g.add_node("verify", self.verify)
         g.add_node("analyze", self.analyze)
         g.add_node("write", self.write)
 
         g.add_edge(START, "recall")
         g.add_edge("recall", "clarify")
         g.add_conditional_edges("clarify", self.after_clarify, ["ask_user", "plan"])
-        g.add_conditional_edges("ask_user", self.after_ask, ["plan", "dispatch", "analyze"])
+        g.add_conditional_edges("ask_user", self.after_ask, ["plan", "dispatch", "verify"])
         g.add_edge("plan", "review")
-        g.add_conditional_edges("dispatch", self.fan_out, ["research", "reflect", "analyze", END])
+        g.add_conditional_edges("dispatch", self.fan_out, ["research", "reflect", "verify", END])
         g.add_edge("research", "collect")
         g.add_edge("collect", "dispatch")
-        g.add_conditional_edges("reflect", self.after_reflect, ["ask_user", "dispatch", "analyze"])
+        g.add_conditional_edges("reflect", self.after_reflect, ["ask_user", "dispatch", "verify"])
+        g.add_edge("verify", "analyze")
         g.add_edge("analyze", "write")
         g.add_edge("write", END)
         return g
@@ -135,13 +145,13 @@ class ResearchGraph:
     def after_ask(s: ResearchState) -> str:
         if not s.get("plan"):
             return "plan"
-        return "analyze" if s.get("done_researching") else "dispatch"
+        return "verify" if s.get("done_researching") else "dispatch"
 
     @staticmethod
     def after_reflect(s: ResearchState) -> str:
         if s.get("pending_questions"):
             return "ask_user"
-        return "analyze" if s.get("done_researching") else "dispatch"
+        return "verify" if s.get("done_researching") else "dispatch"
 
     def fan_out(self, s: ResearchState) -> list[Send] | str:
         if s.get("status") == "aborted":
@@ -156,7 +166,7 @@ class ResearchGraph:
                 "deps": [findings[d] for d in plan.get(tid).depends_on if d in findings],
             }) for tid in s["wave"]]
         if s.get("stop") or s.get("rounds", 0) >= self.budget.max_rounds:
-            return "analyze"
+            return "verify"
         return "reflect"
 
     # ================================================================== nodes
@@ -189,6 +199,9 @@ class ResearchGraph:
                        + "; ".join(p["topic"] for p in prior),
                        sessions=[p["session_id"] for p in prior])
         update["memory"] = prior
+        if line := self._policy().describe():
+            update["context"] += [line]
+            self._emit("policy.loaded", line)
         return update
 
     def clarify(self, s: ResearchState) -> dict:
@@ -300,6 +313,8 @@ class ResearchGraph:
         plan = Plan.model_validate(s["plan"])
         findings = dict(s.get("findings", {}))
         seen = set(s.get("seen_urls", []))
+        evidence: dict[str, str] = {}
+        policy_drops = 0
         for item in s.get("raw", []):
             task = plan.get(item["task_id"])
             if task is None or task.status != "running":
@@ -313,7 +328,10 @@ class ResearchGraph:
             hits = [SearchHit.model_validate(h) for h in item["hits"]]
             finding = ctx.curate(task, draft, hits, recency_days=plan.recency_days,
                                  today=self.today, seen_urls=seen,
-                                 blocked_domains=self.blocked_domains)
+                                 blocked_domains=self.blocked_domains, policy=self._policy())
+            evidence.update(verify.evidence_from_hits(hits))
+            policy_drops += sum(1 for _, r in finding.dropped
+                                if "your source rules" in r or "your allowlist" in r)
             for url, reason in finding.dropped:
                 self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
                 self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}",
@@ -331,7 +349,32 @@ class ResearchGraph:
                        task=task.id, searched=len(hits))
         self.store.update_session(self.sid, plan_json=plan.model_dump_json())
         return {"raw": None, "plan": plan.model_dump(), "findings": findings,
-                "seen_urls": sorted(seen), "wave": []}
+                "seen_urls": sorted(seen), "wave": [], "evidence": evidence,
+                "policy_drops": policy_drops}
+
+    def verify(self, s: ResearchState) -> dict:
+        """Check claims against the text of their cited pages; label corroboration."""
+        findings = self._findings(s)
+        if not findings:
+            return {}
+        if self.budget.verify_claims > 0:
+            self._emit("verify.started", "Checking claims against their cited pages")
+        else:  # still label corroboration (pure code) and mark every claim unchecked
+            self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
+        search = getattr(self.llm, "search", None)
+        fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
+            if search is not None else None
+        evidence = dict(s.get("evidence", {}))
+        result = verify.verify_findings(findings, llm=self.llm, evidence=evidence, fetch=fetch,
+                                        max_claims=self.budget.verify_claims, emit=self._emit)
+        for f in findings:
+            self.store.update_finding(self.sid, f.task_id, f.model_dump_json())
+        c = result.counts
+        self._emit("verify.done",
+                   f"{c.get('supported', 0)} supported, {c.get('partially_supported', 0)} partly, "
+                   f"{c.get('unsupported', 0)} unsupported, {c.get('unverifiable', 0)} unverifiable, "
+                   f"{c.get('unchecked', 0)} unchecked", counts=c, fetched=result.fetched)
+        return {"findings": {f.task_id: f.model_dump() for f in findings}, "evidence": evidence}
 
     def reflect(self, s: ResearchState) -> dict:
         plan = Plan.model_validate(s["plan"])
@@ -370,8 +413,16 @@ class ResearchGraph:
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
         draft = self.llm.structured(purpose="report", system=prompts.WRITER, prompt=prompt,
                                     schema=ReportDraft)
-        report = Report(session_id=self.sid, draft=draft, sources=ctx.all_sources(findings),
-                        analysis=analysis)
+        sources = ctx.all_sources(findings)
+        checks = [c for f in findings for c in f.checks]
+        quality = verify.check_report(draft, sources, checks, s.get("policy_drops", 0))
+        report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis,
+                        checks=checks, quality=quality)
+        self._emit("report.checked",
+                   f"{len(quality.invalid_citations)} invalid citation(s) fixed, "
+                   f"{len(quality.uncited_statements)} uncited statement(s), "
+                   f"{len(quality.weak_takeaways)} weakly sourced takeaway(s)",
+                   invalid=quality.invalid_citations)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-z0-9]+", "-", plan.topic.lower()).strip("-")[:50] or "report"
         path = self.reports_dir / f"{self.sid}-{slug}.md"
@@ -388,6 +439,9 @@ class ResearchGraph:
         return {"status": "done", "report": {**s["report"], "full": report.model_dump()}}
 
     # ================================================================== helpers
+    def _policy(self) -> SourcePolicy:
+        return self.source_policy or SourcePolicy.from_rules(self.store.source_rules())
+
     def _learn_profile(self, topic: str) -> None:
         if not self.use_profile:
             return

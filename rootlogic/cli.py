@@ -24,6 +24,7 @@ from .models import Plan, SubTaskDraft
 from .orchestrator import Budget, Orchestrator
 from .store import Store
 from .backend import Backend, BackendError, parse_prices
+from .filters import RULES, SourcePolicy, clean_domain
 
 console = Console()
 HOME = Path(os.environ.get("ROOTLOGIC_HOME", ".rootlogic"))
@@ -131,7 +132,8 @@ def show_plan(plan: Plan) -> None:
 
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
                   budget: Budget | None = None, home: Path = HOME,
-                  backend: Backend | None = None, use_profile: bool = True):
+                  backend: Backend | None = None, use_profile: bool = True,
+                  source_policy: SourcePolicy | None = None):
     """Construct an engine with usage accounting wired to the store.
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
@@ -154,10 +156,11 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
     if engine == "graph":
         from .graph import ResearchGraph
         eng = ResearchGraph(llm, store, ui, checkpoint_path=home / "checkpoints.db",
-                            budget=budget, reports_dir=home / "reports", use_profile=use_profile)
+                            budget=budget, reports_dir=home / "reports", use_profile=use_profile,
+                            source_policy=source_policy)
     else:
         eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports",
-                           use_profile=use_profile)
+                           use_profile=use_profile, source_policy=source_policy)
     holder["e"] = eng
     return eng
 
@@ -166,10 +169,17 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
     ui = TerminalUI(auto_approve=getattr(args, "yes", False),
                     verbose=getattr(args, "verbose", False))
     budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
-                    max_parallel=args.parallel, max_searches=args.searches)
+                    max_parallel=args.parallel, max_searches=args.searches,
+                    verify_claims=0 if getattr(args, "no_verify", False)
+                    else getattr(args, "verify_claims", 12))
     backend = backend_from_args(args).validate()
+    policy = None
+    if getattr(args, "block", None) or getattr(args, "only", None):  # per-run extras + saved rules
+        policy = SourcePolicy.from_rules(store.source_rules(), block=tuple(args.block or ()),
+                                         only=tuple(args.only or ()))
     eng = create_engine(store, ui, engine=engine, offline=args.offline, budget=budget,
-                        backend=backend, use_profile=not getattr(args, "no_profile", False))
+                        backend=backend, use_profile=not getattr(args, "no_profile", False),
+                        source_policy=policy)
     if not args.offline:
         console.print(f"[dim]Model: {backend.label}[/]")
     install_pause_handler(eng, ui)
@@ -259,6 +269,88 @@ def cmd_history(args, store: Store) -> int:
     console.print(table)
     if sugg := store.suggestions():
         console.print("[bold]Suggested next topics:[/] " + " · ".join(sugg))
+    return 0
+
+
+def cmd_eval(args, store: Store) -> int:
+    """Run the evaluation set and score the results (see rootlogic/evaluate.py)."""
+    import tempfile
+
+    from .evaluate import EvalRun, compare, load_cases, run_eval
+
+    cases = load_cases(args.cases, ids=args.case, kinds=args.kind)
+    if not cases:
+        console.print("[red]No matching cases.[/]")
+        return 1
+    backend = backend_from_args(args).validate()
+    if not args.offline and not args.yes:
+        console.print(f"About to run [bold]{len(cases)}[/] live research sessions on "
+                      f"{backend.label}. Each costs roughly as much as a normal research run.")
+        if Prompt.ask("Continue?", choices=["y", "n"], default="n") != "y":
+            return 1
+    budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks, max_parallel=args.parallel,
+                    max_searches=args.searches, verify_claims=args.verify_claims)
+    work = Path(tempfile.mkdtemp(prefix="rootlogic-eval-"))
+
+    def make_engine(case_store, ui):
+        return create_engine(case_store, ui, engine=args.engine, offline=args.offline,
+                             budget=budget, home=work, backend=backend, use_profile=False,
+                             source_policy=SourcePolicy())
+
+    def show(r):
+        mark = "[green]pass[/]" if r.passed else "[red]fail[/]"
+        extra = "" if r.passed else " — " + "; ".join(r.reasons)
+        console.print(f"{mark} {r.kind:<10} {r.id}{escape(extra)}", highlight=False)
+
+    run = run_eval(cases, make_engine, engine_name=args.engine,
+                   model="offline-fake" if args.offline else backend.label, on_result=show)
+    out = Path(args.out or f"evals/results/{run.started_at.replace(':', '')}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(run.model_dump_json(indent=2))
+
+    table = Table(title="Evaluation summary")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    diff = compare(run, EvalRun.model_validate_json(Path(args.baseline).read_text())) \
+        if args.baseline else None
+    for k, v in run.summary.items():
+        delta = diff["deltas"].get(k) if diff else None
+        table.add_row(k, f"{v}" + (f"  ({delta:+})" if delta else ""))
+    console.print(table)
+    if diff and diff["changed"]:
+        console.print("[bold]Changed vs baseline:[/] " + ", ".join(
+            f"{k}: {v}" for k, v in diff["changed"].items()))
+    console.print(f"Results saved to {out}")
+    return 0
+
+
+def cmd_sources(args, store: Store) -> int:
+    """Your rules for which sites research may use and how much to trust them."""
+    if args.action in RULES:
+        if not args.domains:
+            console.print(f"[red]Usage:[/] rootlogic sources {args.action} <domain> [...]")
+            return 1
+        for d in args.domains:
+            store.set_source_rule(clean_domain(d), args.action)
+    elif args.action == "rm":
+        for d in args.domains:
+            gone = store.remove_source_rule(clean_domain(d))
+            console.print(f"{clean_domain(d)}: {'removed' if gone else 'no rule'}")
+    rules = store.source_rules()
+    if not rules:
+        console.print("[dim]No source rules. Examples: rootlogic sources block example.com · "
+                      "sources trust who.int · sources allow nature.com science.org "
+                      "(allow = only these sites)[/]")
+        return 0
+    table = Table(title="Source rules")
+    table.add_column("domain")
+    table.add_column("rule")
+    meaning = {"block": "never used", "allow": "allowlist: only allowed sites are used",
+               "trust": "credibility forced high", "distrust": "credibility forced low; "
+               "can't be a claim's only support"}
+    for r in rules:
+        table.add_row(r["domain"], f"{r['rule']} — {meaning[r['rule']]}")
+    console.print(table)
     return 0
 
 
@@ -354,6 +446,17 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
                    help="Zero Data Retention: Claude web tools without dynamic filtering")
 
 
+def add_quality_args(p: argparse.ArgumentParser) -> None:
+    g = p.add_argument_group("quality and sources")
+    g.add_argument("--verify-claims", type=int, default=12, metavar="N",
+                   help="claims to check against their cited pages (default 12)")
+    g.add_argument("--no-verify", action="store_true", help="skip claim verification")
+    g.add_argument("--block", action="append", metavar="DOMAIN",
+                   help="never use this site in this run (repeatable)")
+    g.add_argument("--only", action="append", metavar="DOMAIN",
+                   help="use only these sites in this run (repeatable)")
+
+
 def backend_from_args(args: argparse.Namespace) -> Backend:
     return Backend(provider=getattr(args, "provider", "anthropic"),
                    model=getattr(args, "model", None), base_url=getattr(args, "base_url", None),
@@ -374,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="continue an earlier session: reuse its findings, research only what's new")
     r.add_argument("--no-profile", action="store_true",
                    help="don't use or update your standing preferences for this run")
+    add_quality_args(r)
     r.add_argument("-v", "--verbose", action="store_true", help="show dropped sources")
     r.add_argument("--offline", action="store_true", help="use the fake LLM (no API calls)")
     r.add_argument("--rounds", type=int, default=2, help="max reflection rounds")
@@ -389,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("session")
     rs.add_argument("--offline", action="store_true")
     add_backend_args(rs)
+    add_quality_args(rs)
     rs.set_defaults(fn=cmd_resume, rounds=2, max_tasks=10, parallel=4, searches=5)
 
     w = sub.add_parser("web", help="start the web UI (FastAPI + SSE)")
@@ -399,6 +504,29 @@ def main(argv: list[str] | None = None) -> int:
 
     gr = sub.add_parser("graph", help="print the LangGraph engine as a Mermaid diagram")
     gr.set_defaults(fn=cmd_graph)
+
+    ev = sub.add_parser("eval", help="run the evaluation set and score quality and safety")
+    ev.add_argument("--cases", default="evals/cases.json")
+    ev.add_argument("--case", action="append", help="run only this case id (repeatable)")
+    ev.add_argument("--kind", action="append",
+                    choices=["fact", "hoax", "contested", "recency", "harmful"])
+    ev.add_argument("--offline", action="store_true", help="fake LLM: tests the harness, free")
+    ev.add_argument("--engine", choices=["loop", "graph"], default="loop")
+    ev.add_argument("--out", help="where to save results JSON")
+    ev.add_argument("--baseline", help="earlier results JSON to compare against")
+    ev.add_argument("-y", "--yes", action="store_true", help="skip the cost confirmation")
+    ev.add_argument("--rounds", type=int, default=1)
+    ev.add_argument("--max-tasks", type=int, default=6)
+    ev.add_argument("--parallel", type=int, default=4)
+    ev.add_argument("--searches", type=int, default=4)
+    ev.add_argument("--verify-claims", type=int, default=12)
+    add_backend_args(ev)
+    ev.set_defaults(fn=cmd_eval)
+
+    so = sub.add_parser("sources", help="block, allow, trust or distrust websites")
+    so.add_argument("action", nargs="?", choices=["list", *RULES, "rm"], default="list")
+    so.add_argument("domains", nargs="*")
+    so.set_defaults(fn=cmd_sources)
 
     pr = sub.add_parser("profile", help="view or edit your standing preferences")
     pr.add_argument("action", nargs="?", choices=["list", "add", "rm", "clear"], default="list")

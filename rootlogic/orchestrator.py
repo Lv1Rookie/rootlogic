@@ -14,7 +14,8 @@ from datetime import date
 from pathlib import Path
 
 from . import context as ctx
-from . import continuity
+from . import continuity, verify
+from .filters import SourcePolicy
 from . import prompts
 from .control import Command, Control, Event, Interaction
 from .llm import LLM, AgentRefusal, LLMError
@@ -33,12 +34,14 @@ class Budget:
     max_tasks: int = 10        # hard cap on sub-tasks per session
     max_parallel: int = 4      # concurrent research sub-agents
     max_searches: int = 5      # web searches per sub-agent
+    verify_claims: int = 12    # claims checked against their cited pages (0 = no verification)
 
 
 class Orchestrator:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, budget: Budget | None = None,
                  reports_dir: Path | str = "reports", today: date | None = None,
-                 blocked_domains: tuple[str, ...] = (), use_profile: bool = True):
+                 blocked_domains: tuple[str, ...] = (), use_profile: bool = True,
+                 source_policy: SourcePolicy | None = None):
         self.llm = llm
         self.store = store
         self.ui = ui
@@ -47,6 +50,10 @@ class Orchestrator:
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
         self.use_profile = use_profile          # read + learn the user's standing preferences
+        self.source_policy = source_policy      # None: load the user's saved source rules
+        self.policy = SourcePolicy()
+        self.policy_drops = 0
+        self.evidence: dict[str, str] = {}      # normalized url -> fetched page text
         self.control = Control()
         # per-session state
         self.sid = ""
@@ -65,6 +72,7 @@ class Orchestrator:
         self._emit("session.started", f"Session {self.sid}: “{topic}”")
         try:
             self._load_profile()
+            self._load_policy()
             self._continue_from(previous)
             memory = self._recall(topic)
             self._clarify(topic, memory)
@@ -76,6 +84,7 @@ class Orchestrator:
             self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
             self._save_plan(plan)
             self._research_loop(plan)
+            self._verify()
             analysis = self._analyze(plan)
             report = self._write(plan, analysis)
         except Aborted as e:
@@ -97,6 +106,12 @@ class Orchestrator:
             self.context.extend(continuity.profile_context(prefs))
             self._emit("profile.loaded", f"Using {len(prefs)} standing preference(s): "
                        + "; ".join(p["text"] for p in prefs), count=len(prefs))
+
+    def _load_policy(self) -> None:
+        self.policy = self.source_policy or SourcePolicy.from_rules(self.store.source_rules())
+        if line := self.policy.describe():
+            self.context.append(line)
+            self._emit("policy.loaded", line)
 
     def _continue_from(self, previous: continuity.Previous | None) -> None:
         if previous is None:
@@ -198,8 +213,12 @@ class Orchestrator:
     def _accept_finding(self, plan: Plan, task: SubTask, result: tuple[FindingDraft, list]) -> None:
         draft, hits = result
         finding = ctx.curate(task, draft, hits, recency_days=plan.recency_days, today=self.today,
-                             seen_urls=self.seen_urls, blocked_domains=self.blocked_domains)
+                             seen_urls=self.seen_urls, blocked_domains=self.blocked_domains,
+                             policy=self.policy)
         kept, dropped = finding.sources, finding.dropped
+        self.evidence.update(verify.evidence_from_hits(hits))
+        self.policy_drops += sum(1 for _, r in dropped if "your source rules" in r
+                                 or "your allowlist" in r)
         for url, reason in dropped:
             self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
             self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}", task=task.id)
@@ -237,6 +256,28 @@ class Orchestrator:
         # Nothing new to research: continue only if the user just gave us new information.
         return bool(r.questions_for_user) and not r.sufficient
 
+    def _verify(self) -> None:
+        """Check claims against the text of their cited pages; label corroboration."""
+        if not self.findings:
+            return
+        if self.budget.verify_claims > 0:
+            self._emit("verify.started", "Checking claims against their cited pages")
+        else:  # still label corroboration (pure code) and mark every claim unchecked
+            self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
+        search = getattr(self.llm, "search", None)
+        fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
+            if search is not None else None
+        result = verify.verify_findings(list(self.findings.values()), llm=self.llm,
+                                        evidence=self.evidence, fetch=fetch,
+                                        max_claims=self.budget.verify_claims, emit=self._emit)
+        for f in self.findings.values():
+            self.store.update_finding(self.sid, f.task_id, f.model_dump_json())
+        c = result.counts
+        self._emit("verify.done",
+                   f"{c.get('supported', 0)} supported, {c.get('partially_supported', 0)} partly, "
+                   f"{c.get('unsupported', 0)} unsupported, {c.get('unverifiable', 0)} unverifiable, "
+                   f"{c.get('unchecked', 0)} unchecked", counts=c, fetched=result.fetched)
+
     def _analyze(self, plan: Plan) -> Analysis:
         self._emit("analyze.started", "Cross-checking sources for consensus and contradictions")
         analysis = self.llm.structured(purpose="analyze", system=prompts.ANALYST,
@@ -252,7 +293,15 @@ class Orchestrator:
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
         draft = self.llm.structured(purpose="report", system=prompts.WRITER, prompt=prompt,
                                     schema=ReportDraft)
-        report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis)
+        checks = [c for f in self.findings.values() for c in f.checks]
+        quality = verify.check_report(draft, sources, checks, self.policy_drops)
+        report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis,
+                        checks=checks, quality=quality)
+        self._emit("report.checked",
+                   f"{len(quality.invalid_citations)} invalid citation(s) fixed, "
+                   f"{len(quality.uncited_statements)} uncited statement(s), "
+                   f"{len(quality.weak_takeaways)} weakly sourced takeaway(s)",
+                   invalid=quality.invalid_citations)
 
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         path = self.reports_dir / f"{self.sid}-{_slug(plan.topic)}.md"

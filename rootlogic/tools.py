@@ -66,6 +66,7 @@ class WebToolbox:
             page = self.search.fetch(str(args.get("url", "")))
             if page.error:
                 return f"Could not fetch {page.url}: {page.error}", True
+            self.hits.append(SearchHit(url=page.url, title="", text=page.text))  # evidence
             return f"Content of {page.url} (untrusted):\n\n{page.text}", False
         except SearchError as e:
             return f"{name} failed: {e}", True

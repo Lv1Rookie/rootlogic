@@ -126,6 +126,23 @@ class ProfileUpdate(Strict):
                                               "contradicts or supersedes. Empty if none.")
 
 
+class ClaimVerdictDraft(Strict):
+    claim_number: int = Field(description="The claim's number as given in the prompt.")
+    verdict: Literal["supported", "partially_supported", "unsupported"]
+    quote: str = Field(description="A short VERBATIM quote from the evidence that supports the "
+                                   "claim; empty string if there is none.")
+    note: str = Field(description="One sentence: what the evidence does or doesn't say.")
+
+
+class VerificationDraft(Strict):
+    checks: list[ClaimVerdictDraft]
+
+
+class HoaxJudgement(Strict):
+    asserted: bool = Field(description="True if the report presents the statement as true.")
+    reasoning: str
+
+
 # --------------------------------------------------------------------------- runtime
 
 TaskStatus = Literal["pending", "running", "done", "skipped", "failed"]
@@ -188,10 +205,26 @@ class Plan(BaseModel):
 
 
 class SearchHit(BaseModel):
-    """A raw web_search result as returned by the search tool, before LLM curation."""
+    """A raw search result, or a fetched page (``text`` set), seen by a research sub-agent."""
     url: str
     title: str
     page_age: str | None = None
+    text: str | None = None   # page text when the sub-agent fetched it: evidence for verification
+
+
+Verdict = Literal["supported", "partially_supported", "unsupported", "unverifiable", "unchecked"]
+Corroboration = Literal["corroborated", "single_source", "weak", "none"]
+
+
+class CheckedClaim(BaseModel):
+    """A claim after verification (model + code) and corroboration (code)."""
+    text: str
+    source_urls: list[str]
+    verdict: Verdict = "unchecked"
+    quote: str = ""
+    note: str = ""
+    corroboration: Corroboration = "none"
+    domains: list[str] = []
 
 
 class Finding(BaseModel):
@@ -203,6 +236,25 @@ class Finding(BaseModel):
     gaps: list[str]
     confidence: str
     dropped: list[tuple[str, str]] = []  # (url, reason) removed by source filters
+    checks: list[CheckedClaim] = []      # filled by verify.verify_findings
+
+
+class ReportQuality(BaseModel):
+    """Deterministic checks on the written report (verify.check_report)."""
+    claims: dict[str, int] = {}              # verdict -> count
+    corroboration: dict[str, int] = {}       # label -> count
+    invalid_citations: list[str] = []        # e.g. "[9]" pointing at no source (replaced by [?])
+    uncited_statements: list[str] = []       # factual-looking sentences with no [n]
+    weak_takeaways: list[str] = []           # takeaways citing only low-credibility sources
+    policy_drops: int = 0                    # sources removed by the user's source rules
+
+    @property
+    def supported_ratio(self) -> float | None:
+        judged = sum(self.claims.get(v, 0) for v in
+                     ("supported", "partially_supported", "unsupported"))
+        if not judged:
+            return None
+        return (self.claims.get("supported", 0) + self.claims.get("partially_supported", 0)) / judged
 
 
 class Report(BaseModel):
@@ -210,6 +262,8 @@ class Report(BaseModel):
     draft: ReportDraft
     sources: list[SourceDraft]
     analysis: Analysis
+    checks: list[CheckedClaim] = []
+    quality: ReportQuality | None = None
 
     def to_markdown(self) -> str:
         d = self.draft
@@ -227,8 +281,55 @@ class Report(BaseModel):
             lines += ["## Open questions", ""] + [f"- {q}" for q in d.open_questions] + [""]
         if d.related_topics:
             lines += ["## Suggested next research", ""] + [f"- {t}" for t in d.related_topics] + [""]
+        lines += self._quality_markdown()
         lines += ["## Sources", ""]
         for i, s in enumerate(self.sources, start=1):
             lines.append(f"{i}. [{s.title}]({s.url}) — {s.publisher}, {s.published} "
                          f"(credibility: {s.credibility.level})")
         return "\n".join(lines) + "\n"
+
+    def _quality_markdown(self) -> list[str]:
+        q = self.quality
+        if q is None:
+            return []
+        c = q.claims
+        lines = ["## Confidence and limitations", ""]
+        if sum(c.values()):
+            ratio = q.supported_ratio
+            lines.append(
+                f"- **Claim verification:** {c.get('supported', 0)} supported, "
+                f"{c.get('partially_supported', 0)} partially supported, "
+                f"{c.get('unsupported', 0)} unsupported (withheld as fact), "
+                f"{c.get('unverifiable', 0)} unverifiable (page text unavailable), "
+                f"{c.get('unchecked', 0)} not checked (budget or verification off)"
+                + (f". {ratio:.0%} of checked claims held up." if ratio is not None else "."))
+        k = q.corroboration
+        if sum(k.values()):
+            lines.append(f"- **Corroboration:** {k.get('corroborated', 0)} claims backed by 2+ "
+                         f"independent sites, {k.get('single_source', 0)} single-source, "
+                         f"{k.get('weak', 0)} resting only on low-credibility sources.")
+        if q.invalid_citations:
+            lines.append(f"- **Citation fixes:** {', '.join(q.invalid_citations)} pointed at no "
+                         "source and were replaced with [?].")
+        if q.uncited_statements:
+            lines.append(f"- **Uncited statements:** {len(q.uncited_statements)} factual-looking "
+                         "sentence(s) have no citation; treat them with care.")
+        if q.weak_takeaways:
+            lines.append(f"- **Weakly sourced takeaways:** {len(q.weak_takeaways)} cite only "
+                         "low-credibility sources.")
+        if q.policy_drops:
+            lines.append(f"- **Your source rules** removed {q.policy_drops} source(s).")
+        lines.append("- Verification checks claims against the text of cited pages; it cannot "
+                     "prove a claim true, only that its source says it.")
+        lines.append("")
+        if self.checks:
+            index = {s.url: i for i, s in enumerate(self.sources, start=1)}
+            lines += ["## Claim check", "", "| Claim | Verdict | Corroboration | Sources |",
+                      "|---|---|---|---|"]
+            for ch in self.checks:
+                refs = " ".join(f"[{index[u]}]" for u in ch.source_urls if u in index) or "—"
+                text = ch.text.replace("|", "\\|")
+                lines.append(f"| {text} | {ch.verdict.replace('_', ' ')} | "
+                             f"{ch.corroboration.replace('_', ' ')} | {refs} |")
+            lines.append("")
+        return lines
