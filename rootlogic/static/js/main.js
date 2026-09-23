@@ -7,6 +7,7 @@ import { loadHistory } from "./history.js";
 import { loadProfile, loadRules } from "./panels.js";
 import { loadPrompts } from "./prompts.js";
 import { startRun, follow } from "./run.js";
+import { steer } from "./steer.js";
 
 // --------------------------------------------------------------- tabs
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -28,6 +29,25 @@ $("#continue").onsubmit = async e => {
 
 $("#topic").onkeydown = e => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#start").requestSubmit();
+};
+
+// --------------------------------------------------------------- steering a live run
+// The cards are re-rendered on every event, so the click is delegated to their container.
+$("#agents").addEventListener("click", e => {
+  const btn = e.target.closest(".skip-task");
+  if (btn) steer({ action: "skip", arg: btn.dataset.task });
+});
+
+$("#steer").onsubmit = e => {
+  e.preventDefault();
+  const add = $("#steer-add").value.trim(), guidance = $("#steer-note").value.trim();
+  const cmds = [];
+  if (add) cmds.push({ action: "add", arg: add });
+  if (guidance) cmds.push({ action: "note", arg: guidance });
+  if (!cmds.length) return;
+  $("#steer-add").value = "";
+  $("#steer-note").value = "";
+  steer(...cmds);
 };
 
 // --------------------------------------------------------------- settings forms

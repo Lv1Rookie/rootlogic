@@ -103,6 +103,17 @@
           <button class="btn primary" type="submit">Continue</button></div>
       </form>
 
+      <div class="panel" id="progress-panel">
+        <div id="stages" class="stages"></div>
+        <div id="agents" class="agents hidden"></div>
+        <form id="steer" class="row" style="margin-top:8px">
+          <input type="text" id="steer-add" style="flex:1;min-width:0" placeholder="Add a sub-task question">
+          <input type="text" id="steer-note" style="flex:1;min-width:0" placeholder="Guidance, e.g. focus on the EU">
+          <button class="btn small" type="submit">Steer</button>
+        </form>
+        <div id="steer-note-out" class="meta"></div>
+      </div>
+
       <div class="panel" id="plan-panel">
         <h2>Plan</h2>
         <div id="plan-objective" class="meta"></div>

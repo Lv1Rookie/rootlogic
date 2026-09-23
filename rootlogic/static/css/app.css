@@ -108,3 +108,23 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
 .prompt .pname { font-weight: 600; text-transform: capitalize; }
 .prompt textarea { width: 100%; margin-top: 8px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .prompt .row { margin-top: 6px; }
+
+/* ------------------------------------------------------------ progress: stages + agents */
+.stages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.stage { font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line);
+         color: var(--muted); background: var(--bg); }
+.stage.done { color: var(--ink); border-color: var(--accent); }
+.stage.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent);
+                font-weight: 600; }
+.stage-sep { color: var(--line); font-size: 11px; }
+.agents { display: grid; gap: 8px; margin-top: 10px; }
+.agent { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; padding: 8px 10px; }
+.agent.running { border-left-color: var(--accent); }
+.agent.done { border-left-color: var(--ok, var(--accent)); }
+.agent.failed { border-left-color: var(--bad); }
+.agent-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.agent-head .id { font-family: ui-monospace, Menlo, monospace; color: var(--muted); }
+.agent-head .q { flex: 1; min-width: 200px; }
+.agent .steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
+.agent .steps .what { word-break: break-word; }
+.agent .steps li::before { content: "› "; color: var(--muted); }

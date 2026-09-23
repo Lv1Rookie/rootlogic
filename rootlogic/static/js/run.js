@@ -9,6 +9,8 @@ import { showRequest } from "./requests.js";
 import { renderUsage, maybeResume } from "./usage.js";
 import { loadHistory } from "./history.js";
 import { loadProfile } from "./panels.js";
+import { trackStage } from "./stages.js";
+import { trackAgent } from "./agents.js";
 
 export async function startRun(topic, parent = null) {
   const run = await api("/api/runs", {
@@ -50,6 +52,7 @@ export function handle(ev) {
     case "run.error": return logEvent({ ...ev, type: "run.error" });
     case "run.finished":
       state.sid = ev.session_id || state.sid;
+      trackStage(ev);
       setStatus(ev.status);
       $("#cards").innerHTML = "";
       afterFinish();
@@ -62,6 +65,8 @@ export function handle(ev) {
   if (ev.type === "override.stop") {
     for (const id of state.order) if (state.tasks[id].status === "pending") state.tasks[id].status = "skipped";
   }
+  trackStage(ev);
+  trackAgent(ev);
   trackTask(ev);
   logEvent(ev);
 }

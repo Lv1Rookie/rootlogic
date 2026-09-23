@@ -7,6 +7,7 @@ import { $, esc } from "./dom.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { setPlan } from "./plan.js";
+import { hasQueued, drain } from "./steer.js";
 
 function card(ev, title, bodyHTML) {
   const el = document.createElement("div");
@@ -79,6 +80,9 @@ function reviewPlan(ev) {
 
 function override(ev) {
   setPlan(ev.plan);
+  // The pause came from a Skip or Steer click: apply what was asked and keep going, rather
+  // than making the user confirm a panel they didn't open.
+  if (hasQueued()) return send(ev, { commands: drain() });
   const pending = ev.plan.subtasks.filter(t => t.status === "pending");
   const el = card(ev, "Paused — override the agent", `
     ${pending.length ? `<p class="meta">Skip pending sub-tasks:</p><div class="chips skips">${pending.map(t =>

@@ -5,6 +5,8 @@
 // importer pointing at the same object.
 
 import { $ } from "./dom.js";
+import { resetStages } from "./stages.js";
+import { resetAgents } from "./agents.js";
 
 export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "" };
 
@@ -33,6 +35,8 @@ export function resetView(topic) {
   $("#v-topic").textContent = topic;
   $("#v-meta").textContent = "";
   $("#cards").innerHTML = "";
+  resetStages();
+  resetAgents();
   $("#tab-log").innerHTML = "";
   $("#tab-report").innerHTML = `<div class="empty">The report appears here when research finishes.</div>`;
   $("#tab-usage").innerHTML = `<div class="empty">Usage appears when the session ends.</div>`;
