@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from rootlogic.filters import fill_dates_from_hits, filter_sources, normalize_url, parse_date
 from rootlogic.models import Credibility, SearchHit, SourceDraft
 
@@ -76,3 +78,22 @@ def test_plan_ids_stay_unique_after_drop():
                    "user")
     assert new.id == "t4"
     assert len({t.id for t in plan.subtasks}) == len(plan.subtasks)
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("Tue, 24 Mar 2026 04:00:00 GMT", date(2026, 3, 24)),     # Tavily's published_date
+    ("Thu, 19 Mar 2026 00:00:00 GMT", date(2026, 3, 19)),
+    ("Mon, 01 Jan 2019 00:00:00 -0500", date(2019, 1, 1)),    # with a numeric offset
+    ("24 Mar 2026 04:00:00 GMT", date(2026, 3, 24)),          # no weekday
+])
+def test_rfc_1123_dates_are_parsed(value, expected):
+    """Live run: Tavily returned RFC-1123 dates, parse_date gave None for every one of them,
+    and the outdated filter silently kept everything."""
+    assert parse_date(value, date(2026, 9, 22)) == expected
+
+
+def test_outdated_sources_are_dropped_when_dated_rfc_1123():
+    """The filter must act on those dates, not just parse them."""
+    old = src("https://old.example/a", published="Mon, 01 Jan 2019 00:00:00 GMT")
+    kept, dropped = filter_sources([old], recency_days=365, today=TODAY)
+    assert kept == [] and "outdated (2019-01-01" in dropped[0][1]

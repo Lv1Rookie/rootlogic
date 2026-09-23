@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
@@ -91,7 +92,7 @@ _FORMATS = ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y", "%Y/%m
 
 
 def parse_date(value: str | None, today: date) -> date | None:
-    """Best-effort parse of ISO dates, 'March 3, 2025', or '3 days ago'. None if unknown."""
+    """Best-effort parse of ISO, RFC 1123, 'March 3, 2025' or '3 days ago'. None if unknown."""
     if not value or value.strip().lower() in ("unknown", "n/a", "none"):
         return None
     text = value.strip()
@@ -100,6 +101,12 @@ def parse_date(value: str | None, today: date) -> date | None:
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
     except ValueError:
+        pass
+    # RFC 1123, e.g. "Tue, 24 Mar 2026 04:00:00 GMT": what Tavily returns for many pages.
+    # Missed live, and a date that won't parse means the outdated filter never fires.
+    try:
+        return parsedate_to_datetime(text).date()
+    except (TypeError, ValueError):
         pass
     for fmt in _FORMATS:
         try:
