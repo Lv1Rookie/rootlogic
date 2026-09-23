@@ -69,11 +69,13 @@ def step_event(task_id: str, step: Step) -> tuple[str, str, dict]:
 
     Both engines report sub-agent progress the same way, so the wording lives here once.
     """
+    why = f": {step.error}" if step.error else ""
     if step.kind == "search":
-        outcome = f"{step.results} result(s)" if step.ok else "search failed"
+        outcome = f"{step.results} result(s)" if step.ok else f"search failed{why}"
         return ("subagent.search",
                 f"[{task_id}] Searched \u201c{step.detail}\u201d \u2014 {outcome}",
-                {"task": task_id, "query": step.detail, "results": step.results})
+                {"task": task_id, "query": step.detail, "results": step.results,
+                 "error": step.error})
     verb = "Read" if step.ok else "Could not read"
-    return ("subagent.fetch", f"[{task_id}] {verb} {step.detail}",
-            {"task": task_id, "url": step.detail})
+    return ("subagent.fetch", f"[{task_id}] {verb} {step.detail}{why}",
+            {"task": task_id, "url": step.detail, "error": step.error})

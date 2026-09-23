@@ -224,3 +224,41 @@ def test_a_failing_progress_observer_does_not_fail_the_sub_task():
     finding, _ = llm.research(purpose="research:t1", system="s", prompt="p",
                               schema=FindingDraft, on_step=boom)
     assert finding.confidence == "medium"
+
+
+def test_a_failed_search_reports_why_it_failed():
+    """Live run: the log said '[t1] Searched "..." — search failed' three times and nothing
+    more, so the cause (a rejected Tavily key) was invisible from the action log."""
+    from rootlogic.control import step_event
+    from rootlogic.search import SearchError
+
+    class Rejecting(StaticSearch):
+        def search(self, query, *, max_results=5, recency_days=0):
+            raise SearchError("Tavily /search failed: HTTP 401")
+
+    llm, _ = make_llm([
+        [tool_use("web_search", {"query": "q"}, "u1")],
+        [tool_use("submit_findings", FINDING, "u2")],
+    ], Rejecting())
+
+    steps = []
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 on_step=steps.append)
+
+    assert steps[0].ok is False and steps[0].error == "Tavily /search failed: HTTP 401"
+    _, message, data = step_event("t1", steps[0])
+    assert "search failed: Tavily /search failed: HTTP 401" in message
+    assert data["error"] == "Tavily /search failed: HTTP 401"
+
+
+def test_a_failed_fetch_reports_why_too():
+    search = StaticSearch(results=[SearchResult(url="https://a.com", title="A", snippet="s")])
+    llm, _ = make_llm([
+        [tool_use("web_fetch", {"url": "https://gone.example"}, "u1")],
+        [tool_use("submit_findings", FINDING, "u2")],
+    ], search)
+
+    steps = []
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 on_step=steps.append)
+    assert steps[0].kind == "fetch" and steps[0].error == "not found"

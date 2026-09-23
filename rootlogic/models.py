@@ -233,6 +233,7 @@ class Step(BaseModel):
     detail: str               # the query text, or the URL
     results: int = 0          # results returned (search) / 1 for a page that came back
     ok: bool = True
+    error: str = ""           # why it failed: "search failed" alone can't be acted on
 
 
 Verdict = Literal["supported", "partially_supported", "unsupported", "unverifiable", "unchecked"]

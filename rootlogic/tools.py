@@ -70,21 +70,22 @@ class WebToolbox:
                 return json.dumps([r.model_dump() for r in found]), False
             page = self.search.fetch(str(args.get("url", "")))
             if page.error:
-                self._step("fetch", page.url, ok=False)
+                self._step("fetch", page.url, ok=False, error=page.error)
                 return f"Could not fetch {page.url}: {page.error}", True
             self.hits.append(SearchHit(url=page.url, title="", text=page.text))  # evidence
             self._step("fetch", page.url, results=1)
             return f"Content of {page.url} (untrusted):\n\n{page.text}", False
         except SearchError as e:
             self._step("search" if name == "web_search" else "fetch",
-                       str(args.get("query") or args.get("url") or ""), ok=False)
+                       str(args.get("query") or args.get("url") or ""), ok=False, error=str(e))
             return f"{name} failed: {e}", True
 
-    def _step(self, kind: str, detail: str, *, results: int = 0, ok: bool = True) -> None:
+    def _step(self, kind: str, detail: str, *, results: int = 0, ok: bool = True,
+              error: str = "") -> None:
         """Report progress to whoever is watching. A broken observer must not fail a task."""
         if self.on_step is None:
             return
         try:
-            self.on_step(Step(kind=kind, detail=detail, results=results, ok=ok))
+            self.on_step(Step(kind=kind, detail=detail, results=results, ok=ok, error=error))
         except Exception:  # noqa: BLE001 - progress reporting is never worth losing research
             pass

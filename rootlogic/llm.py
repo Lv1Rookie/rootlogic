@@ -310,14 +310,16 @@ def _steps(content) -> list[Step]:
         if block.type not in ("web_search_tool_result", "web_fetch_tool_result"):
             continue
         call = asked.get(getattr(block, "tool_use_id", None))
+        error = getattr(block.content, "error_code", "") or ""
         if block.type == "web_search_tool_result":
             results = block.content if isinstance(block.content, list) else []
             steps.append(Step(kind="search", detail=_tool_input(call, "query"),
-                              results=len(results), ok=isinstance(block.content, list)))
+                              results=len(results), ok=isinstance(block.content, list),
+                              error=error))
             continue
         ok = getattr(block.content, "type", None) == "web_fetch_result"
         url = getattr(block.content, "url", None) or _tool_input(call, "url")
-        steps.append(Step(kind="fetch", detail=url, results=1 if ok else 0, ok=ok))
+        steps.append(Step(kind="fetch", detail=url, results=1 if ok else 0, ok=ok, error=error))
     return steps
 
 
