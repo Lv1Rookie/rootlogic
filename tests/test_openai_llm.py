@@ -214,3 +214,28 @@ def test_cli_reports_invalid_backend_cleanly(tmp_path, capsys):
     code = main(["--db", str(tmp_path / "x.db"), "research", "--provider", "openai",
                  "--model", "m", "--moderation", "none", "-y", "topic"])
     assert code == 2 and "needs --search tavily" in capsys.readouterr().out
+
+
+def empty_completion(error=None):
+    """A 200 response carrying no choices: what OpenRouter returned on a free model."""
+    # The SDK builds responses leniently, so a malformed body reaches us as-is: choices=None
+    # rather than a validation error. model_construct reproduces that.
+    body = {"id": "x", "object": "chat.completion", "created": 0, "model": "gpt-test",
+            "choices": None, "usage": None}
+    if error:
+        body["error"] = error
+    return ChatCompletion.model_construct(**body)
+
+
+def test_missing_choices_explains_itself_instead_of_crashing():
+    llm, _, usages = make([empty_completion(
+        {"message": "Rate limit exceeded: free-models-per-day", "code": 429})])
+    with pytest.raises(LLMError, match="Rate limit exceeded: free-models-per-day"):
+        llm.structured(purpose="plan", system="s", prompt="p", schema=Clarification)
+    assert usages[0].stop_reason == "no_choices"   # still recorded, cost stays visible
+
+
+def test_missing_choices_without_an_error_message_suggests_what_to_try():
+    llm, _, _ = make([empty_completion()])
+    with pytest.raises(LLMError, match="try another --model, or --no-strict"):
+        llm.structured(purpose="plan", system="s", prompt="p", schema=Clarification)

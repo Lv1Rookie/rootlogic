@@ -70,16 +70,20 @@ class OpenAICompatibleLLM:
                                 f"{e.message}") from e
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
 
+        # Not every OpenAI-compatible server returns a well-formed completion: routers and
+        # local servers can answer 200 with an error object and no choices at all.
+        choice = (response.choices or [None])[0]
         u = response.usage
         cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
         usage = Usage(purpose=purpose, model=response.model or self.model,
                       input_tokens=((u.prompt_tokens or 0) - cached) if u else 0,
-                      output_tokens=(u.completion_tokens or 0) if u else 0,
-                      cache_read_tokens=cached, stop_reason=response.choices[0].finish_reason,
+                      output_tokens=(u.completion_tokens or 0) if u else 0, cache_read_tokens=cached,
+                      stop_reason=choice.finish_reason if choice else "no_choices",
                       request_id=getattr(response, "_request_id", None), prices=self.prices)
         self.usage_sink(usage)
 
-        choice = response.choices[0]
+        if choice is None:
+            raise LLMError(f"{purpose}: the provider returned no completion. {_why(response)}")
         if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             raise AgentRefusal(f"{purpose}: model declined "
                                f"({choice.message.refusal or choice.finish_reason})")
@@ -145,6 +149,21 @@ class OpenAICompatibleLLM:
 
 
 # =================================================================== helpers
+
+
+def _why(response) -> str:
+    """Whatever the server said instead of a completion (routers put an error object here)."""
+    error = getattr(response, "error", None)
+    if error is None and isinstance(getattr(response, "model_extra", None), dict):
+        error = response.model_extra.get("error")
+    if isinstance(error, dict):
+        detail = error.get("message") or error
+        code = error.get("code")
+        return f"Provider said: {detail}" + (f" (code {code})" if code else "")
+    if error:
+        return f"Provider said: {error}"
+    return ("No error message was included. The model may be rate limited or unavailable: try "
+            "another --model, or --no-strict if it rejects strict JSON schemas.")
 
 
 def _assistant_turn(message) -> dict:
