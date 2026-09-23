@@ -236,7 +236,7 @@ check that:
   unscreened by accident.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 171 tests run in a few seconds with no internet.
+is added first. All 176 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -258,6 +258,7 @@ and `profile`. Useful flags on `research`:
 | `--zdr` | Zero Data Retention mode for Claude's web tools (Step 15) |
 | `--no-profile` | Doesn't use or update the learned profile for this run (Step 16) |
 | `--provider openai --model … [--base-url …]` | Runs on another model (Step 17) |
+| `--worker-model MODEL` | Research sub-agents on a cheaper model than planning and writing |
 | `--block` / `--only DOMAIN` | Source rules for one run (Step 18) |
 | `--verify-claims N` / `--no-verify` | How many claims to verify against their pages (Step 18) |
 | `--moderation {auto,none,openai,llama-guard}` | Content screening for non-Claude models (Step 19) |
