@@ -518,3 +518,35 @@ def test_a_claim_with_no_page_text_records_why_it_was_unverifiable():
     verify_findings([f], llm=FakeLLM(), evidence={})       # nothing fetched, nothing cached
     assert f.checks[0].verdict == "unverifiable"
     assert f.checks[0].unverifiable_reason == "page_unreadable"
+
+
+# ------------------------------------------------------------------ numeric matching
+
+
+@pytest.mark.parametrize("claim,quote,missing", [
+    # the genuine catch: the claim's figure appears nowhere in the quote
+    ("Unemployment fell to 7.2% in 2025", "Unemployment fell to 3.9 percent in 2025", {"7.2"}),
+    # one substantive figure is enough; an incidental date need not be repeated
+    ("In July 2026 the extent was 15.39 million km2", "the extent was 15.39 million km2", set()),
+    # bare years are context, not the claim's evidence
+    ("The WHO has not released coverage data for 2026", "no data has been published", set()),
+    # same value, different spelling
+    ("Growth reached 3.90 million", "growth reached 3.9 million", set()),
+    ("Growth reached 3.9 million", "growth reached 3.90 million", set()),
+    # no figures at all: nothing to check
+    ("Adoption is widespread", "adoption is widespread across newsrooms", set()),
+])
+def test_numeric_matching_catches_wrong_figures_without_false_alarms(claim, quote, missing):
+    """Live runs produced three false downgrades: an incidental date, a negative claim about a
+    year, and 3.90 vs 3.9. Requiring every figure was too strict to be useful."""
+    from rootlogic.verify import _missing_figures
+
+    assert _missing_figures(claim, quote) == missing
+
+
+def test_a_claim_whose_only_figure_is_a_year_still_checks_that_year():
+    """A year can be the substance: then it is the only figure there is to check."""
+    from rootlogic.verify import _missing_figures
+
+    assert _missing_figures("The telescope launched in 2021", "it launched in 2019") == {"2021"}
+    assert _missing_figures("The telescope launched in 2021", "it launched in 2021") == set()

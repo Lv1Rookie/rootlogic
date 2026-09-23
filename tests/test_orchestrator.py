@@ -305,3 +305,22 @@ def test_questions_do_not_crash_a_run_with_no_terminal(monkeypatch):
     assert ui.ask("Which region matters most?") == ""   # skipped, not crashed
     assert ui.review_plan(plan) is plan                 # default "a": approve and continue
     assert ui.override(plan) == []                      # default "continue": no commands
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_skipping_a_task_names_it_in_the_event_data(tmp_path, kind):
+    """The UI groups events by task id: without one, a skipped sub-agent's card never leaves
+    the running state while the plan table correctly shows it skipped."""
+    from rootlogic.graph import ResearchGraph
+
+    store, ui = Store(), ScriptedUI(overrides=[[Command(action="skip", arg="t2")]])
+    ui.pause_before_wave = True
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(FakeLLM(), store, ui, **kw))
+    engine.control.request_pause()
+    engine.run("impact of generative AI on newsrooms")
+
+    skips = [e for e in ui.events if e.type == "override.skip"]
+    assert skips, [e.type for e in ui.events]
+    assert skips[0].data.get("task") == "t2"

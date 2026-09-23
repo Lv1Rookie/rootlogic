@@ -93,9 +93,17 @@ def quote_source(quote: str, pages: dict[str, str], claimed: str = "") -> str:
 
 
 def numbers_in(text: str) -> set[str]:
-    """Figures a claim rests on: 3.9% -> {"3.9"}, "8,848.86 m" -> {"8848.86"}, 2025 -> {"2025"}."""
-    return {n.replace(",", "").rstrip(".").lstrip("0") or "0"
-            for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+    """Figures in a string, normalised so equal values compare equal.
+
+    "3.9%" -> {"3.9"}, "8,848.86 m" -> {"8848.86"}, "3.90" -> {"3.9"}, 2025 -> {"2025"}.
+    """
+    found = set()
+    for raw in re.findall(r"\d[\d,]*(?:\.\d+)?", text):
+        n = raw.replace(",", "")
+        if "." in n:
+            n = n.rstrip("0").rstrip(".")   # 3.90 and 3.9 are the same number
+        found.add(n.lstrip("0") or "0")
+    return found
 
 
 # =================================================================== corroboration
@@ -257,10 +265,29 @@ def _judge(f: Finding, items: list[tuple[int, CheckedClaim, dict[str, str]]], ll
             check.verdict = v.verdict
 
 
+_YEAR = re.compile(r"^(19|20)\d\d$")
+
+
 def _missing_figures(claim: str, quote: str) -> set[str]:
-    """Figures the claim states that its own supporting quote never mentions."""
+    """Figures a claim states that its supporting quote never mentions.
+
+    Deliberately lenient in two ways, after three false downgrades in live runs. Only one of
+    the claim's figures has to appear: a quote carrying the measurement supports the claim
+    even if it words the date differently. And a bare year is context rather than the
+    evidence - "has not released data for 2026" can have no quote containing 2026 - unless
+    the year is the only figure the claim makes, in which case it is the thing to check.
+    """
     wanted = numbers_in(claim)
-    return wanted - numbers_in(quote) if wanted else set()
+    if not wanted:
+        return set()
+    have = numbers_in(quote)
+    substantive = {n for n in wanted if not _YEAR.match(n)}
+    if not substantive:
+        # Year-only claim. Check it against a quote that states years ("launched in 2021" vs
+        # "launched in 2019"), but not against a quote with no figures at all: "has not
+        # released data for 2026" cannot be evidenced by a sentence containing 2026.
+        return set() if not have or wanted & have else wanted
+    return set() if substantive & have else substantive
 
 
 # =================================================================== prompt labels

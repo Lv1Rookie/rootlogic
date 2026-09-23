@@ -204,14 +204,13 @@ def test_mermaid_diagram_renders(tmp_path):
 
 def test_events_persist_structured_data_like_orchestrator(tmp_path):
     """Regression: the graph engine used to drop event data, leaving events.data NULL."""
-    import json
     g, _, store, ui = make(tmp_path)
     g.run(TOPIC)
 
     rows = {r["type"]: r for r in store.events(g.sid)}
     for t in ("task.started", "task.done", "source.dropped"):
-        assert json.loads(rows[t]["data"])["task"].startswith("t"), t
-    assert json.loads(rows["plan.created"]["data"])["tasks"]
-    assert "path" in json.loads(rows["session.done"]["data"])
+        assert rows[t]["data"]["task"].startswith("t"), t          # read back as an object
+    assert rows["plan.created"]["data"]["tasks"]
+    assert "path" in rows["session.done"]["data"]
     # and the UI receives the same data
     assert next(e for e in ui.events if e.type == "task.started").data["task"]

@@ -12,6 +12,13 @@ let queued = [];
 
 export const hasQueued = () => queued.length > 0;
 
+/** Forget anything queued. A command is meant for the run it was clicked on: a run that ends
+ *  before its next checkpoint must not hand its skips to whatever runs next. */
+export function resetSteer() {
+  queued = [];
+  note("");
+}
+
 export function drain() {
   const cmds = queued;
   queued = [];

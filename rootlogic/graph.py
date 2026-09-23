@@ -525,7 +525,8 @@ class ResearchGraph:
             elif cmd.action == "skip" and (t := plan.get(cmd.arg)) and t.status == "pending":
                 t.status = "skipped"
                 self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
-                self._emit("override.skip", f"User skipped [{t.id}] {t.question}")
+                self._emit("override.skip", f"User skipped [{t.id}] {t.question}",
+                           task=t.id)
             elif cmd.action in ("add", "note") and cmd.arg and \
                     self.moderation.input_blocked(cmd.arg, cmd.action):
                 continue

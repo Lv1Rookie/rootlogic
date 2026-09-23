@@ -6,6 +6,8 @@ import { state, resetView, setStatus, showTab } from "./state.js";
 import { setPlan, trackTask } from "./plan.js";
 import { logEvent } from "./log.js";
 import { renderUsage, maybeResume } from "./usage.js";
+import { trackStage } from "./stages.js";
+import { trackAgent } from "./agents.js";
 
 export async function loadHistory() {
   const { sessions, suggestions } = await api("/api/sessions");
@@ -39,7 +41,8 @@ export async function openSession(sid) {
   state.sid = sid;
   setStatus(d.session.status);
   if (d.session.plan_json) setPlan(JSON.parse(d.session.plan_json));
-  for (const ev of d.events) { trackTask(ev); logEvent(ev); }
+  // Same three views as a live run: the stored events are the only difference.
+  for (const ev of d.events) { trackStage(ev); trackAgent(ev); trackTask(ev); logEvent(ev); }
   if (d.report) { $("#tab-report").innerHTML = md(d.report); showTab("report"); }
   renderUsage(d);
   maybeResume(d);

@@ -211,7 +211,12 @@ class Store:
                    (sid, now(), type_, message, json.dumps(data) if data else None))
 
     def events(self, sid: str) -> list[dict[str, Any]]:
-        return self._all("SELECT * FROM events WHERE session_id = ? ORDER BY id", (sid,))
+        """``data`` comes back as the object it was stored from, so a replayed event looks
+        exactly like a live one to anything consuming it."""
+        rows = self._all("SELECT * FROM events WHERE session_id = ? ORDER BY id", (sid,))
+        for row in rows:
+            row["data"] = json.loads(row["data"]) if row["data"] else {}
+        return rows
 
     # ------------------------------------------------------------------ tasks + sources
     def tasks(self, sid: str) -> list[dict[str, Any]]:

@@ -299,3 +299,17 @@ def test_a_run_uses_the_stored_prompts(client, tmp_path):
     events = client.get(f"/api/sessions/{d['session_id']}").json()["events"]
     assert any(e["type"] == "prompt.custom" and "writer" in e["message"] for e in events)
     assert client.get(f"/api/sessions/{d['session_id']}").json()["session"]["prompts_json"]
+
+
+def test_stored_events_carry_data_as_an_object(client):
+    """The live stream sends data as an object; replaying a session sent the raw JSON string,
+    so the UI's ev.data.task lookups silently found nothing and the cards stayed empty."""
+    run = client.post("/api/runs", json={"topic": "impact of generative AI on newsrooms",
+                                         "offline": True}).json()
+    d = wait(client, run["run_id"], lambda r: r["events"] >= 3)
+
+    events = client.get(f"/api/sessions/{d['session_id']}").json()["events"]
+    with_data = [e for e in events if e.get("data")]
+    assert with_data, events
+    for e in with_data:
+        assert isinstance(e["data"], dict), e
