@@ -230,3 +230,36 @@ def test_plan_prompt_keeps_its_bracketed_letters():
     with console.capture() as capture:
         console.print(PLAN_PROMPT)
     assert "[a]pprove, [e]dit, [q]uit" in capture.get()
+
+
+def test_every_frontend_asset_is_served(tmp_path):
+    """The UI is split into ES modules with no bundler, so a mistyped import path or a file
+    the server doesn't expose is a blank page at demo time, not a build error."""
+    from pathlib import Path
+
+    client = TestClient(create_app(Store(tmp_path / "w.db"), tmp_path))
+    page = client.get("/")
+    assert page.status_code == 200
+    assert '<script type="module" src="/static/js/main.js">' in page.text
+    assert '<link rel="stylesheet" href="/static/css/app.css">' in page.text
+
+    static = Path(__file__).resolve().parents[1] / "rootlogic" / "static"
+    files = [p.relative_to(static).as_posix() for p in static.rglob("*")
+             if p.is_file() and p.suffix in (".js", ".css")]
+    assert len(files) >= 8, files
+    for rel in files:
+        r = client.get(f"/static/{rel}")
+        assert r.status_code == 200, rel
+        expected = "text/javascript" if rel.endswith(".js") else "text/css"
+        assert expected in r.headers["content-type"], (rel, r.headers["content-type"])
+
+
+def test_module_imports_resolve_to_files_that_exist():
+    """Browsers resolve these paths themselves; a typo fails silently in the console."""
+    import re
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[1] / "rootlogic" / "static"
+    for path in (static / "js").glob("*.js"):
+        for imported in re.findall(r'from\s+"(\./[^"]+)"', path.read_text()):
+            assert (path.parent / imported).is_file(), f"{path.name} imports missing {imported}"

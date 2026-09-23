@@ -27,6 +27,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .backend import Backend, BackendError
@@ -234,6 +235,9 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
 
     # ------------------------------------------------------------- pages
+    # The UI is plain ES modules: no build step, so the browser resolves the imports itself.
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
