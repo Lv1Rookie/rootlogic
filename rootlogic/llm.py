@@ -122,6 +122,14 @@ class AnthropicLLM:
                 fallbacks="default",  # re-run a safety-declined request on a fallback model
                 **kwargs,
             )
+        except TypeError as e:
+            # No credentials configured at all: the SDK raises a bare TypeError ("Could not
+            # resolve authentication method") when it builds the request, which reached a
+            # live run as a traceback. A missing key is a setup problem, like a rejected one.
+            raise AuthError(
+                "No Anthropic credentials found. Set ANTHROPIC_API_KEY, or tick Offline demo "
+                "(--offline) to run without an API key, or use a local model with "
+                f"--provider openai --base-url. ({e})") from e
         except anthropic.APIConnectionError as e:
             raise LLMError(f"network error during {purpose}: {e}") from e
         except anthropic.RateLimitError as e:

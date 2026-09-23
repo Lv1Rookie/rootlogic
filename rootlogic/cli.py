@@ -27,6 +27,7 @@ from .backend import Backend, BackendError, parse_prices
 from .llm import AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
 from .moderation import offline_moderator
+from .prompts import EDITABLE, PromptSet
 
 console = Console()
 # Brackets are Rich style tags, so the letters must be escaped or they vanish from the prompt.
@@ -153,12 +154,16 @@ def show_plan(plan: Plan) -> None:
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
                   budget: Budget | None = None, home: Path = HOME,
                   backend: Backend | None = None, use_profile: bool = True,
-                  source_policy: SourcePolicy | None = None):
+                  source_policy: SourcePolicy | None = None,
+                  prompt_set: PromptSet | None = None):
     """Construct an engine with usage accounting wired to the store.
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
     """
     budget = budget or Budget()
+    # Prompt edits are a stored setting, like the profile and the source rules: a run picks
+    # them up unless the caller passes an explicit set.
+    prompt_set = prompt_set or PromptSet.from_overrides(store.prompts())
     holder: dict = {}
     usage_sink = lambda u: store.record_call(  # noqa: E731
         session_id=holder["e"].sid or None, purpose=u.purpose, model=u.model,
@@ -183,12 +188,13 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
         eng = ResearchGraph(llm, store, ui, worker_llm=worker_llm,
                             checkpoint_path=home / "checkpoints.db",
                             budget=budget, reports_dir=home / "reports", use_profile=use_profile,
-                            source_policy=source_policy, moderator=moderator)
+                            source_policy=source_policy, moderator=moderator,
+                            prompt_set=prompt_set)
     else:
         eng = Orchestrator(llm, store, ui, worker_llm=worker_llm, budget=budget,
                            reports_dir=home / "reports",
                            use_profile=use_profile, source_policy=source_policy,
-                           moderator=moderator)
+                           moderator=moderator, prompt_set=prompt_set)
     holder["e"] = eng
     return eng
 

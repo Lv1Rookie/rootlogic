@@ -322,3 +322,18 @@ def test_offline_runs_do_not_block_ordinary_topics(tmp_path):
     engine = create_engine(store, ScriptedUI(), home=tmp_path, offline=True)
     assert engine.run("impact of generative AI on newsrooms") is not None
     assert store.session(engine.sid)["status"] == "done"
+
+
+def test_a_missing_api_key_is_explained_not_a_typeerror(monkeypatch):
+    """Seen in the browser: with no ANTHROPIC_API_KEY the run died with the SDK's
+    'Could not resolve authentication method' TypeError instead of our own message."""
+    from rootlogic.backend import Backend
+    from rootlogic.llm import AuthError
+
+    from rootlogic.models import Clarification
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    llm = Backend().make_llm(lambda u: None)
+    with pytest.raises(AuthError, match="ANTHROPIC_API_KEY"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)

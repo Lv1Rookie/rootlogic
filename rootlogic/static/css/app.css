@@ -100,3 +100,11 @@ tr.dropped td { opacity: .45; text-decoration: line-through; }
   aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); }
   .ev { grid-template-columns: 56px 1fr; } .ev .ty { grid-column: 2; } .ev .msg { grid-column: 1 / -1; }
 }
+
+/* ------------------------------------------------------------ system prompts */
+.prompt { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--panel); }
+.prompt.custom { border-color: var(--warn); }
+.prompt summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.prompt .pname { font-weight: 600; text-transform: capitalize; }
+.prompt textarea { width: 100%; margin-top: 8px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prompt .row { margin-top: 6px; }

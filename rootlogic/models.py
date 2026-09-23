@@ -280,6 +280,7 @@ class ReportQuality(BaseModel):
     uncited_statements: list[str] = []       # factual-looking sentences with no [n]
     weak_takeaways: list[str] = []           # takeaways citing only low-credibility sources
     policy_drops: int = 0                    # sources removed by the user's source rules
+    custom_prompts: list[str] = []           # editable prompts the user rewrote for this run
     moderation_warnings: list[str] = []      # sensitive-content flags that didn't block
     moderation_provider: str = ""
 
@@ -369,6 +370,10 @@ class Report(BaseModel):
             lines.append(f"- **Content flags ({q.moderation_provider}, not blocking):** "
                          f"{', '.join(q.moderation_warnings)}. The report covers sensitive "
                          "subject matter; read it with that in mind.")
+        if q.custom_prompts:
+            lines.append(f"- **Custom prompts:** the {', '.join(q.custom_prompts)} prompt(s) were "
+                         "rewritten for this run, so this report was not produced by the "
+                         "standard pipeline.")
         if q.policy_drops:
             lines.append(f"- **Your source rules** removed {q.policy_drops} source(s).")
         lines.append("- Verification checks claims against the text of cited pages; it cannot "

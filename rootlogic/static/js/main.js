@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { state, resetView, setStatus, showTab } from "./state.js";
 import { loadHistory } from "./history.js";
 import { loadProfile, loadRules } from "./panels.js";
+import { loadPrompts } from "./prompts.js";
 import { startRun, follow } from "./run.js";
 
 // --------------------------------------------------------------- tabs
@@ -93,7 +94,7 @@ for (const [id, prop] of [["engine", "value"], ["offline", "checked"],
 
 // Re-attach to a live run after a page refresh.
 (async () => {
-  await Promise.all([loadHistory(), loadProfile(), loadRules()]);
+  await Promise.all([loadHistory(), loadProfile(), loadRules(), loadPrompts()]);
   const live = (await api("/api/runs")).filter(r => r.status === "running").pop();
   if (live) {
     resetView(live.topic);

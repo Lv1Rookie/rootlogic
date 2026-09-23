@@ -156,7 +156,7 @@ def page_fetcher(search: SearchProvider | None) -> Fetch | None:
 
 def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, str],
                     fetch: Fetch | None = None, max_claims: int = 12, max_fetches: int = 6,
-                    emit: Emit | None = None) -> VerifyResult:
+                    emit: Emit | None = None, verifier: str = prompts.VERIFIER) -> VerifyResult:
     """Fill ``finding.checks`` for every finding that hasn't been checked yet (earlier
     sessions' findings arrive already checked). Mutates ``evidence`` with pages it fetches."""
     emit = emit or (lambda *a, **k: None)
@@ -195,7 +195,7 @@ def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, st
                 check.unverifiable_reason = "page_unreadable"
                 check.note = "No usable page text for the cited sources."
         if to_judge:
-            _judge(f, to_judge, llm, result, emit)
+            _judge(f, to_judge, llm, result, emit, verifier)
         for check in checks:
             corroborate(check, sources)
         f.checks = checks
@@ -207,7 +207,7 @@ def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, st
 
 
 def _judge(f: Finding, items: list[tuple[int, CheckedClaim, dict[str, str]]], llm: LLM,
-           result: VerifyResult, emit: Emit) -> None:
+           result: VerifyResult, emit: Emit, verifier: str = prompts.VERIFIER) -> None:
     blocks = [f"Sub-task question: {f.question}", ""]
     for n, check, pages in items:
         blocks.append(f"Claim {n}: {check.text}")
@@ -216,7 +216,7 @@ def _judge(f: Finding, items: list[tuple[int, CheckedClaim, dict[str, str]]], ll
         blocks.append("")
     result.calls += 1
     try:
-        draft = llm.structured(purpose=f"verify:{f.task_id}", system=prompts.VERIFIER,
+        draft = llm.structured(purpose=f"verify:{f.task_id}", system=verifier,
                                prompt="\n".join(blocks), schema=VerificationDraft, effort="medium")
     except (LLMError, AgentRefusal) as e:
         emit("verify.skipped", f"[{f.task_id}] Verification unavailable: {e}", task=f.task_id)
@@ -293,7 +293,7 @@ def _sentences(markdown: str) -> list[str]:
 
 
 def check_report(draft: ReportDraft, sources: list[SourceDraft], checks: list[CheckedClaim],
-                 policy_drops: int = 0) -> ReportQuality:
+                 policy_drops: int = 0, custom_prompts: tuple[str, ...] = ()) -> ReportQuality:
     """Deterministic checks. Mutates ``draft`` only to replace citations that point nowhere."""
     n = len(sources)
     invalid: list[str] = []
@@ -319,7 +319,8 @@ def check_report(draft: ReportDraft, sources: list[SourceDraft], checks: list[Ch
 
     quality = ReportQuality(invalid_citations=sorted(set(invalid), key=invalid.index),
                             uncited_statements=uncited[:10], weak_takeaways=weak,
-                            policy_drops=policy_drops)
+                            policy_drops=policy_drops,
+                            custom_prompts=list(custom_prompts))
     for c in checks:
         quality.claims[c.verdict] = quality.claims.get(c.verdict, 0) + 1
         quality.corroboration[c.corroboration] = quality.corroboration.get(c.corroboration, 0) + 1

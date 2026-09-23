@@ -91,7 +91,7 @@ class ResearchGraph:
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
                  today: date | None = None, blocked_domains: tuple[str, ...] = (),
                  use_profile: bool = True, source_policy: SourcePolicy | None = None,
-                 moderator: Moderator | None = None):
+                 moderator: Moderator | None = None, prompt_set: prompts.PromptSet | None = None):
         self.llm = llm                      # planning, reflection, analysis, writing, verifying
         self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
@@ -100,6 +100,7 @@ class ResearchGraph:
         self.reports_dir = Path(reports_dir)
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
+        self.prompts = prompt_set or prompts.PromptSet()   # editable per run; disclosed
         self.use_profile = use_profile
         self.source_policy = source_policy   # None: the user's saved rules, read when needed
         self.moderation = ModerationGate(moderator, self._emit)
@@ -240,7 +241,7 @@ class ResearchGraph:
 
     def plan(self, s: ResearchState) -> dict:
         self._emit("plan.started", "Decomposing topic into sub-tasks")
-        draft = self.llm.structured(purpose="plan", system=prompts.PLANNER, schema=PlanDraft,
+        draft = self.llm.structured(purpose="plan", system=self.prompts.planner, schema=PlanDraft,
                                     prompt=ctx.topic_block(s["topic"], self.today,
                                                            s.get("memory", []),
                                                            s.get("context", []),
@@ -310,7 +311,7 @@ class ResearchGraph:
         prompt = ctx.research_prompt(plan, task, self.today, payload["context"], deps)
         try:
             draft, hits = self.worker.research(purpose=f"research:{task.id}",
-                                               system=prompts.RESEARCHER, prompt=prompt,
+                                               system=self.prompts.researcher, prompt=prompt,
                                                schema=FindingDraft,
                                                max_searches=self.budget.max_searches,
                                                recency_days=plan.recency_days,
@@ -380,6 +381,7 @@ class ResearchGraph:
         fetch = verify.page_fetcher(search)
         evidence = dict(s.get("evidence", {}))
         result = verify.verify_findings(findings, llm=self.llm, evidence=evidence, fetch=fetch,
+                                        verifier=self.prompts.verifier,
                                         max_claims=self.budget.verify_claims, emit=self._emit)
         for f in findings:
             self.store.update_finding(self.sid, f.task_id, f.model_dump_json())
@@ -425,11 +427,12 @@ class ResearchGraph:
         self._emit("report.started", "Writing report")
         prompt = (ctx.findings_block(plan, findings, s.get("context", []))
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
-        draft = self.llm.structured(purpose="report", system=prompts.WRITER, prompt=prompt,
+        draft = self.llm.structured(purpose="report", system=self.prompts.writer, prompt=prompt,
                                     schema=ReportDraft)
         sources = ctx.all_sources(findings)
         checks = [c for f in findings for c in f.checks]
-        quality = verify.check_report(draft, sources, checks, s.get("policy_drops", 0))
+        quality = verify.check_report(draft, sources, checks, s.get("policy_drops", 0),
+                                      self.prompts.customised)
         report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis,
                         checks=checks, quality=quality)
         self._emit("report.checked",
@@ -546,6 +549,17 @@ class ResearchGraph:
             self._emit(type_, message, **data)
         return report
 
+    def _announce_prompts(self) -> None:
+        """Say up front which prompts were rewritten: the log is the record of what produced
+        this report, and a custom verifier or writer changes what its numbers mean."""
+        custom = self.prompts.customised
+        self.store.record_session_prompts(
+            self.sid, {name: getattr(self.prompts, name) for name in custom})
+        if custom:
+            self._emit("prompt.custom", "Custom system prompt(s) in use: "
+                       + ", ".join(custom) + " — noted in the report",
+                       prompts=list(custom))
+
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
             self.store.add_event(self.sid, type_, message, data or None)
@@ -562,6 +576,7 @@ class ResearchGraph:
         self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}” (LangGraph engine)")
+        self._announce_prompts()
         try:
             self.moderation.request(topic)
         except Blocked as e:

@@ -263,3 +263,39 @@ def test_module_imports_resolve_to_files_that_exist():
     for path in (static / "js").glob("*.js"):
         for imported in re.findall(r'from\s+"(\./[^"]+)"', path.read_text()):
             assert (path.parent / imported).is_file(), f"{path.name} imports missing {imported}"
+
+
+def test_prompt_endpoints_read_edit_and_reset(client):
+    got = client.get("/api/prompts").json()
+    assert [p["name"] for p in got["prompts"]] == ["planner", "researcher", "verifier", "writer"]
+    planner = next(p for p in got["prompts"] if p["name"] == "planner")
+    assert planner["default"].startswith("You are the planner")
+    assert planner["text"] == planner["default"] and planner["custom"] is False
+
+    assert client.post("/api/prompts", json={"name": "researcher",
+                                             "text": "Prefer official statistics."}).status_code == 200
+    got = client.get("/api/prompts").json()
+    researcher = next(p for p in got["prompts"] if p["name"] == "researcher")
+    assert researcher["text"] == "Prefer official statistics." and researcher["custom"] is True
+
+    assert client.delete("/api/prompts/researcher").status_code == 200
+    got = client.get("/api/prompts").json()
+    assert next(p for p in got["prompts"] if p["name"] == "researcher")["custom"] is False
+
+
+def test_editing_a_prompt_that_does_not_exist_is_rejected(client):
+    assert client.post("/api/prompts", json={"name": "judge", "text": "x"}).status_code == 422
+    assert client.delete("/api/prompts/judge").status_code == 422
+
+
+def test_a_run_uses_the_stored_prompts(client, tmp_path):
+    """The point of storing them: the next run picks them up without being told."""
+    client.post("/api/prompts", json={"name": "writer", "text": "Write in British English."})
+    run = client.post("/api/runs", json={"topic": "impact of generative AI on newsrooms",
+                                         "offline": True}).json()
+    # The run pauses for plan approval, which is enough: disclosure happens at session start.
+    d = wait(client, run["run_id"], lambda r: r["events"] >= 3)
+
+    events = client.get(f"/api/sessions/{d['session_id']}").json()["events"]
+    assert any(e["type"] == "prompt.custom" and "writer" in e["message"] for e in events)
+    assert client.get(f"/api/sessions/{d['session_id']}").json()["session"]["prompts_json"]

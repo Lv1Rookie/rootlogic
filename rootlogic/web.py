@@ -35,6 +35,7 @@ from .control import Command, Event
 from .filters import clean_domain
 from .models import Plan, SubTaskDraft
 from .orchestrator import Budget
+from .prompts import DEFAULTS as prompt_defaults, EDITABLE
 from .store import Store
 
 STATIC = Path(__file__).parent / "static"
@@ -150,6 +151,11 @@ def apply_plan_edits(plan: Plan, *, drop: list[str], add: list[str],
 
 
 # =================================================================== API models
+
+
+class NewPrompt(BaseModel):
+    name: Literal["planner", "researcher", "verifier", "writer"]
+    text: str = Field(max_length=20000)
 
 
 class StartRun(BaseModel):
@@ -342,6 +348,31 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         runs[run.id] = run
         launch(run, "resume", sid, Budget())
         return run.summary()
+
+    # ------------------------------------------------------------- system prompts
+    @app.get("/api/prompts")
+    def get_prompts() -> dict:
+        """Every editable prompt with its default, so the UI can show and reset it."""
+        edits = store.prompts()
+        return {"prompts": [{"name": name, "default": prompt_defaults[name],
+                             "text": edits.get(name, prompt_defaults[name]),
+                             "custom": name in edits} for name in EDITABLE]}
+
+    @app.post("/api/prompts")
+    def set_prompt(body: NewPrompt) -> dict:
+        text = body.text.strip()
+        if not text or text == prompt_defaults[body.name]:
+            store.clear_prompt(body.name)     # back to default rather than a stored copy
+        else:
+            store.set_prompt(body.name, text)
+        return get_prompts()
+
+    @app.delete("/api/prompts/{name}")
+    def reset_prompt(name: str) -> dict:
+        if name not in EDITABLE:
+            raise HTTPException(422, f"Not an editable prompt: {name}")
+        store.clear_prompt(name)
+        return get_prompts()
 
     # ------------------------------------------------------------- source rules
     @app.get("/api/sources")

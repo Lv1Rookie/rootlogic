@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS source_rules ( -- user's site rules: block | allow | 
     rule TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS prompts (   -- the user's edited system prompts (current settings)
+    name TEXT PRIMARY KEY,             -- planner | researcher | verifier | writer
+    text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
     session_id UNINDEXED, topic, summary, takeaways
 );
@@ -123,7 +128,33 @@ class Store:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")}
         if "parent_id" not in cols:  # follow-up sessions link to the session they continue
             self._conn.execute("ALTER TABLE sessions ADD COLUMN parent_id TEXT")
+        if "prompts_json" not in cols:  # the custom prompts this run actually used, if any
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN prompts_json TEXT")
         self._conn.commit()
+
+    # ------------------------------------------------------------------ prompts
+    def prompts(self) -> dict[str, str]:
+        """The user's current prompt edits. Absent names mean "use the default"."""
+        return {r["name"]: r["text"] for r in self._all("SELECT name, text FROM prompts")}
+
+    def set_prompt(self, name: str, text: str) -> None:
+        self._exec("INSERT INTO prompts (name, text, updated_at) VALUES (?,?,?) "
+                   "ON CONFLICT(name) DO UPDATE SET text = excluded.text, "
+                   "updated_at = excluded.updated_at", (name, text, now()))
+
+    def clear_prompt(self, name: str) -> None:
+        """Reset to default by forgetting the edit, not by storing a copy of the default."""
+        self._exec("DELETE FROM prompts WHERE name = ?", (name,))
+
+    def record_session_prompts(self, sid: str, custom: dict[str, str]) -> None:
+        """What this run used, frozen on the session so old reports stay reproducible."""
+        self._exec("UPDATE sessions SET prompts_json = ? WHERE id = ?",
+                   (json.dumps(custom) if custom else None, sid))
+
+    def session_prompts(self, sid: str) -> dict[str, str]:
+        rows = self._all("SELECT prompts_json FROM sessions WHERE id = ?", (sid,))
+        raw = rows[0]["prompts_json"] if rows else None
+        return json.loads(raw) if raw else {}
 
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:

@@ -45,7 +45,8 @@ class Orchestrator:
     def __init__(self, llm: LLM, store: Store, ui: Interaction, *, worker_llm: LLM | None = None, budget: Budget | None = None,
                  reports_dir: Path | str = "reports", today: date | None = None,
                  blocked_domains: tuple[str, ...] = (), use_profile: bool = True,
-                 source_policy: SourcePolicy | None = None, moderator: Moderator | None = None):
+                 source_policy: SourcePolicy | None = None, moderator: Moderator | None = None,
+                 prompt_set: prompts.PromptSet | None = None):
         self.llm = llm                      # planning, reflection, analysis, writing, verifying
         self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
@@ -54,6 +55,7 @@ class Orchestrator:
         self.reports_dir = Path(reports_dir)
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
+        self.prompts = prompt_set or prompts.PromptSet()   # editable per run; disclosed
         self.use_profile = use_profile          # read + learn the user's standing preferences
         self.source_policy = source_policy      # None: load the user's saved source rules
         self.moderation = ModerationGate(moderator, self._emit)  # request, user input, report
@@ -76,6 +78,7 @@ class Orchestrator:
         self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}”")
+        self._announce_prompts()
         try:
             self.moderation.request(topic)
             self._load_profile()
@@ -165,7 +168,7 @@ class Orchestrator:
 
     def _plan(self, topic: str, memory: list[dict]) -> Plan:
         self._emit("plan.started", "Decomposing topic into sub-tasks")
-        draft = self.llm.structured(purpose="plan", system=prompts.PLANNER,
+        draft = self.llm.structured(purpose="plan", system=self.prompts.planner,
                                     prompt=self._topic_block(topic, memory), schema=PlanDraft)
         plan = Plan.from_draft(topic, draft)
         plan.subtasks = plan.subtasks[: self.budget.max_tasks]
@@ -232,7 +235,7 @@ class Orchestrator:
         """Runs in a worker thread: calls the LLM and reports its searches, nothing else."""
         deps = [self.findings[d] for d in task.depends_on if d in self.findings]
         prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
-        return self.worker.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
+        return self.worker.research(purpose=f"research:{task.id}", system=self.prompts.researcher,
                                     prompt=prompt, schema=FindingDraft,
                                     max_searches=self.budget.max_searches,
                                     recency_days=plan.recency_days,
@@ -310,6 +313,7 @@ class Orchestrator:
         search = getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
         fetch = verify.page_fetcher(search)
         result = verify.verify_findings(list(self.findings.values()), llm=self.llm,
+                                        verifier=self.prompts.verifier,
                                         evidence=self.evidence, fetch=fetch,
                                         max_claims=self.budget.verify_claims, emit=self._emit)
         for f in self.findings.values():
@@ -333,10 +337,11 @@ class Orchestrator:
         sources = self._all_sources()
         prompt = (self._findings_block(plan)
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
-        draft = self.llm.structured(purpose="report", system=prompts.WRITER, prompt=prompt,
+        draft = self.llm.structured(purpose="report", system=self.prompts.writer, prompt=prompt,
                                     schema=ReportDraft)
         checks = [c for f in self.findings.values() for c in f.checks]
-        quality = verify.check_report(draft, sources, checks, self.policy_drops)
+        quality = verify.check_report(draft, sources, checks, self.policy_drops,
+                                      self.prompts.customised)
         report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis,
                         checks=checks, quality=quality)
         self._emit("report.checked",
@@ -459,6 +464,17 @@ class Orchestrator:
         return ctx.all_sources(list(self.findings.values()))
 
     # ================================================================== bookkeeping
+    def _announce_prompts(self) -> None:
+        """Say up front which prompts were rewritten: the log is the record of what produced
+        this report, and a custom verifier or writer changes what its numbers mean."""
+        custom = self.prompts.customised
+        self.store.record_session_prompts(
+            self.sid, {name: getattr(self.prompts, name) for name in custom})
+        if custom:
+            self._emit("prompt.custom", "Custom system prompt(s) in use: "
+                       + ", ".join(custom) + " — noted in the report",
+                       prompts=list(custom))
+
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
             self.store.add_event(self.sid, type_, message, data or None)
