@@ -285,3 +285,23 @@ def test_sub_agent_searches_show_up_in_the_action_log(tmp_path, kind):
         window = [i for i, (t, m) in enumerate(log) if m.startswith(f"[{task}]")]
         assert types[window[0]] == "task.started" and types[window[-1]] == "task.done"
     assert types.count("subagent.search") == 3
+
+
+def test_questions_do_not_crash_a_run_with_no_terminal(monkeypatch):
+    """Live: a backgrounded run (nohup, so no stdin) died with EOFError from Rich the moment
+    the agent asked a clarifying question. Every prompt has a safe default; use it."""
+    import rich.prompt
+
+    from rootlogic.cli import TerminalUI
+    from rootlogic.models import Plan
+
+    def no_stdin(*a, **kw):
+        raise EOFError("EOF when reading a line")
+
+    monkeypatch.setattr(rich.prompt.Prompt, "ask", staticmethod(no_stdin))
+    ui = TerminalUI()
+    plan = Plan(topic="t", objective="o", recency_days=365, subtasks=[])
+
+    assert ui.ask("Which region matters most?") == ""   # skipped, not crashed
+    assert ui.review_plan(plan) is plan                 # default "a": approve and continue
+    assert ui.override(plan) == []                      # default "continue": no commands

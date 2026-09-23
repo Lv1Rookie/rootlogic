@@ -40,6 +40,22 @@ STYLE = {
 }
 
 
+def _prompt(*args, **kwargs):
+    """Ask, but treat a closed stdin as "no answer" instead of crashing.
+
+    A run with no terminal (nohup, cron, CI, a piped command) hits EOF the moment anything
+    asks a question. Rich raises EOFError there, which ended a background run with a
+    traceback even though every question has a usable default: skip the clarification,
+    approve the plan, continue the run.
+    """
+    try:
+        return Prompt.ask(*args, **kwargs)
+    except EOFError:
+        default = kwargs.get("default", "")
+        console.print(f"[dim](no terminal: using {default!r})[/]")
+        return default
+
+
 class TerminalUI:
     def __init__(self, auto_approve: bool = False, verbose: bool = False):
         self.auto_approve = auto_approve
@@ -58,8 +74,8 @@ class TerminalUI:
 
     # --------------------------------------------------------------- questions
     def ask(self, question: str) -> str:
-        return Prompt.ask(f"[bold yellow]?[/] {question} [dim](Enter to skip)[/]", default="",
-                          show_default=False)
+        return _prompt(f"[bold yellow]?[/] {question} [dim](Enter to skip)[/]", default="",
+                       show_default=False)
 
     # --------------------------------------------------------------- plan review
     def review_plan(self, plan: Plan) -> Plan | None:
@@ -67,7 +83,7 @@ class TerminalUI:
             show_plan(plan)
             if self.auto_approve:
                 return plan
-            choice = Prompt.ask(PLAN_PROMPT, choices=["a", "e", "q"], default="a")
+            choice = _prompt(PLAN_PROMPT, choices=["a", "e", "q"], default="a")
             if choice == "a":
                 return plan
             if choice == "q":
@@ -102,7 +118,7 @@ class TerminalUI:
             title="Paused — override", border_style="yellow"))
         commands: list[Command] = []
         while True:
-            raw = Prompt.ask("override", default="continue").strip()
+            raw = _prompt("override", default="continue").strip()
             action, _, arg = raw.partition(" ")
             if action == "continue":
                 return commands
