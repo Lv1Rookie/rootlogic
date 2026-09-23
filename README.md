@@ -230,6 +230,9 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
   `ollama pull llama-guard3` and `--moderation llama-guard`. To run unscreened, say so:
   `--moderation none`. `--moderation-strict` blocks on every flag, not only harm-enabling ones.
   If the moderation service can't be reached, the run stops rather than continuing unscreened.
+  `--offline` screens too, with a small deterministic blocklist, so the checkpoints really run
+  in demos and in `rootlogic eval --offline` rather than a missing gate looking like a working
+  one.
 - Invalid combinations are rejected before anything runs (`rootlogic/backend.py`).
 - Smaller local models are noticeably weaker at planning, strict schemas and faithful citation.
   Consider a larger model when quality matters.
