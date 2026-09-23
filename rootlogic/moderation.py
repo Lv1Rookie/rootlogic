@@ -42,7 +42,14 @@ class ModerationError(LLMError):
 
 
 class Blocked(Exception):
-    """Content moderation stopped the run (a harmful request or report)."""
+    """Content moderation stopped the run (a harmful request or report).
+
+    ``stage`` is "request" (nothing was researched) or "report" (the research is done and
+    stored, so the run can be recovered through a follow-up)."""
+
+    def __init__(self, message: str, stage: str = "request"):
+        super().__init__(message)
+        self.stage = stage
 
 
 class ModerationResult(BaseModel):
@@ -103,7 +110,8 @@ class ModerationGate:
         """Raises ``Blocked`` before any research runs."""
         result = self._check(topic, "request")
         if result is not None and result.blocked:
-            raise Blocked("the request was flagged (" + ", ".join(result.blocked_categories) + ")")
+            raise Blocked("the request was flagged ("
+                          + ", ".join(result.blocked_categories) + ")", stage="request")
 
     def input_blocked(self, text: str, what: str) -> bool:
         """Flagged user input mid-run is ignored (never reaches a prompt), not fatal."""
@@ -120,7 +128,7 @@ class ModerationGate:
             return
         if result.blocked:
             raise Blocked("the report was flagged (" + ", ".join(result.blocked_categories)
-                          + "); it was not saved")
+                          + "); it was not saved", stage="report")
         if result.warn_categories and report.quality is not None:
             report.quality.moderation_warnings = result.warn_categories
             report.quality.moderation_provider = result.provider
@@ -236,3 +244,14 @@ class StaticModerator:
         warned = sorted(p for p in self.warn if p in low)
         return ModerationResult(stage=stage, provider=self.name, blocked=bool(blocked),
                                 blocked_categories=blocked, warn_categories=warned)
+
+
+def recovery_hint(stage: str, session_id: str) -> str:
+    """What to do about a block. A flagged report is worth recovering: the research behind it
+    is already stored, and small guard models do misfire (a 1B Llama Guard called a report on
+    AI in newsrooms "S1 violent crimes"). A flagged request researched nothing to recover."""
+    if stage != "report" or not session_id:
+        return ""
+    return (f" The research is kept: re-check it with a stronger moderator, or none, using "
+            f"--follow-up {session_id} (e.g. --moderation-model llama-guard3, or "
+            f"--moderation none).")

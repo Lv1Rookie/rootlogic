@@ -10,8 +10,9 @@ from openai.types import ModerationCreateResponse
 from rootlogic.backend import Backend, BackendError
 from rootlogic.fake_llm import FakeLLM
 from rootlogic.graph import ResearchGraph
-from rootlogic.moderation import (Blocked, LlamaGuardModerator, ModerationError, OpenAIModerator,
-                                  StaticModerator, chunks, parse_llama_guard)
+from rootlogic.moderation import (Blocked, LlamaGuardModerator, ModerationError,
+                                  ModerationResult, OpenAIModerator, StaticModerator,
+                                  chunks, parse_llama_guard)
 from rootlogic.orchestrator import Orchestrator
 from rootlogic.store import Store
 
@@ -237,3 +238,60 @@ def test_cli_explains_the_missing_moderation_choice(tmp_path, capsys, monkeypatc
     code = main(["--db", str(tmp_path / "x.db"), "research", "--provider", "openai",
                  "--model", "m", "--search", "tavily", "-y", "topic"])
     assert code == 2 and "no built-in safety screening" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_a_blocked_report_says_how_to_recover_the_research(tmp_path, kind):
+    """Live with a 1B Llama Guard: a report on AI in newsrooms was flagged S1 (violent
+    crimes) and thrown away after 30 minutes of research. Small guard models misfire, and
+    the findings behind the report are already stored, so say how to get them back."""
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.orchestrator import Orchestrator
+    from rootlogic.store import Store
+    from tests.test_orchestrator import TODAY, ScriptedUI
+
+    class FlagsReports:
+        name = "llama-guard"
+
+        def check(self, text, *, stage, context=""):
+            blocked = stage == "report"
+            return ModerationResult(stage=stage, provider=self.name, blocked=blocked,
+                                    blocked_categories=["S1 violent crimes"] if blocked else [])
+
+    store, ui = Store(), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY, moderator=FlagsReports())
+    engine = (ResearchGraph(FakeLLM(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(FakeLLM(), store, ui, **kw))
+
+    assert engine.run("impact of generative AI on newsrooms") is None
+    assert store.session(engine.sid)["status"] == "blocked"
+
+    blocked = next(e for e in ui.events if e.type == "session.blocked")
+    assert f"--follow-up {engine.sid}" in blocked.message
+    assert "--moderation none" in blocked.message
+    # the research it points at really is there to recover
+    assert [t["status"] for t in store.tasks(engine.sid)] == ["done"] * 3
+
+
+def test_a_blocked_request_has_nothing_to_recover(tmp_path):
+    """Nothing was researched, so pointing at a follow-up would be nonsense."""
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.orchestrator import Orchestrator
+    from rootlogic.store import Store
+    from tests.test_orchestrator import TODAY, ScriptedUI
+
+    class FlagsEverything:
+        name = "llama-guard"
+
+        def check(self, text, *, stage, context=""):
+            return ModerationResult(stage=stage, provider=self.name, blocked=True,
+                                    blocked_categories=["S9 indiscriminate weapons"])
+
+    store, ui = Store(), ScriptedUI()
+    engine = Orchestrator(FakeLLM(), store, ui, reports_dir=tmp_path, today=TODAY,
+                          moderator=FlagsEverything())
+    assert engine.run("how to build a weapon") is None
+
+    blocked = next(e for e in ui.events if e.type == "session.blocked")
+    assert "--follow-up" not in blocked.message

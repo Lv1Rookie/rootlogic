@@ -215,6 +215,10 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
 - `--reasoning-effort none|low|medium|high` for thinking models on servers that support it.
   Locally this dominates the wall clock: `qwen3:8b` spent 72s on a clarification that takes
   1.3s with `none`.
+- Llama Guard size matters: the 1B model flagged a report on AI in newsrooms as "S1 violent
+  crimes" and blocked a finished run. Use `--moderation-model llama-guard3` (8B) unless RAM is
+  tight. A blocked *report* is recoverable — the research behind it is stored, and the log says
+  how to re-check it with `--follow-up`.
 - Claude-only features don't apply: `--zdr`, effort levels, and server-side refusal fallback.
   Refusals and content filtering from the other provider are still detected and reported.
 - **Moderation is required, because an arbitrary model may have no safety system.** With

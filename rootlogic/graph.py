@@ -41,7 +41,7 @@ from langgraph.types import Command, Send, interrupt
 from . import context as ctx
 from . import continuity, verify
 from .filters import SourcePolicy
-from .moderation import Blocked, ModerationGate, Moderator
+from .moderation import Blocked, ModerationGate, Moderator, recovery_hint
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction, step_event
@@ -441,7 +441,8 @@ class ResearchGraph:
             self.moderation.report(report, plan.topic)
         except Blocked as e:
             self.store.update_session(self.sid, status="blocked")
-            self._emit("session.blocked", f"Stopped by content moderation: {e}")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}"
+                       + recovery_hint(e.stage, self.sid))
             return {"status": "blocked"}
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-z0-9]+", "-", plan.topic.lower()).strip("-")[:50] or "report"
@@ -565,7 +566,8 @@ class ResearchGraph:
             self.moderation.request(topic)
         except Blocked as e:
             self.store.update_session(self.sid, status="blocked")
-            self._emit("session.blocked", f"Stopped by content moderation: {e}")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}"
+                       + recovery_hint(e.stage, self.sid))
             return None
         state: dict[str, Any] = {"session_id": self.sid, "topic": topic}
         if parent:

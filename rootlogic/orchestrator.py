@@ -16,7 +16,7 @@ from pathlib import Path
 from . import context as ctx
 from . import continuity, verify
 from .filters import SourcePolicy
-from .moderation import Blocked, ModerationGate, Moderator
+from .moderation import Blocked, ModerationGate, Moderator, recovery_hint
 from . import prompts
 from .control import Command, Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
@@ -101,7 +101,8 @@ class Orchestrator:
             return None
         except Blocked as e:
             self.store.update_session(self.sid, status="blocked")
-            self._emit("session.blocked", f"Stopped by content moderation: {e}")
+            self._emit("session.blocked", f"Stopped by content moderation: {e}"
+                       + recovery_hint(e.stage, self.sid))
             return None
         except (LLMError, AgentRefusal) as e:
             self.store.update_session(self.sid, status="failed")
