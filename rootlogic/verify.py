@@ -73,6 +73,31 @@ def quote_in(quote: str, texts: list[str]) -> bool:
     return len(q) >= MIN_QUOTE and any(q in _squash(t) for t in texts)
 
 
+def quote_source(quote: str, pages: dict[str, str], claimed: str = "") -> str:
+    """Which cited page the quote is really in, or "" if none of them.
+
+    The verifier names the page it copied from; code confirms the text is there. A quote that
+    turns up in a different cited page than the one named is still evidence, so it counts -
+    but the named page is checked first, so a wrong attribution can be told apart from a
+    wrong quote.
+    """
+    q = _squash(quote).rstrip(".…")
+    if len(q) < MIN_QUOTE:
+        return ""
+    if claimed:
+        key = normalize_url(claimed)
+        for url, text in pages.items():
+            if normalize_url(url) == key and q in _squash(text):
+                return url
+    return next((url for url, text in pages.items() if q in _squash(text)), "")
+
+
+def numbers_in(text: str) -> set[str]:
+    """Figures a claim rests on: 3.9% -> {"3.9"}, "8,848.86 m" -> {"8848.86"}, 2025 -> {"2025"}."""
+    return {n.replace(",", "").rstrip(".").lstrip("0") or "0"
+            for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+
+
 # =================================================================== corroboration
 
 
@@ -167,6 +192,7 @@ def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, st
                 to_judge.append((i + 1, check, pages))
             else:
                 check.verdict = "unverifiable"
+                check.unverifiable_reason = "page_unreadable"
                 check.note = "No usable page text for the cited sources."
         if to_judge:
             _judge(f, to_judge, llm, result, emit)
@@ -200,19 +226,41 @@ def _judge(f: Finding, items: list[tuple[int, CheckedClaim, dict[str, str]]], ll
         v = verdicts.get(n)
         if v is None:
             continue
-        found = quote_in(v.quote, list(pages.values()))
+        # Which single page is the quote in? A claim citing three sources must not read as
+        # supported because one of them happens to contain the words (ALCE citation precision).
+        source_url = quote_source(v.quote, pages, v.quote_source_url)
+        found = bool(source_url)
         check.note = v.note
         check.quote = v.quote if found else ""
+        check.quote_url = source_url
+        missing = _missing_figures(check.text, v.quote) if found else set()
+
         if v.verdict == "no_usable_evidence":
             # We failed to READ the page (navigation, paywall, wrong page). That tells us
             # nothing about the claim, so it must not be reported as contradicted.
             check.verdict = "unverifiable"
+            check.unverifiable_reason = "page_unreadable"
+        elif v.verdict == "not_a_factual_claim":
+            check.verdict = "unverifiable"
+            check.unverifiable_reason = "not_a_factual_claim"
         elif v.verdict == "supported" and not found:
             check.verdict = "partially_supported"
             check.note = ("Downgraded: the supporting quote was not found in the source text. "
                           + v.note)
+        elif v.verdict == "supported" and missing:
+            # The quote is real and from the right page, but it doesn't carry the claim's own
+            # figures. Numbers are a documented blind spot of attribution checking.
+            check.verdict = "partially_supported"
+            check.note = (f"Downgraded: the quote does not contain the claim's figure(s) "
+                          f"{', '.join(sorted(missing))}. " + v.note)
         else:
             check.verdict = v.verdict
+
+
+def _missing_figures(claim: str, quote: str) -> set[str]:
+    """Figures the claim states that its own supporting quote never mentions."""
+    wanted = numbers_in(claim)
+    return wanted - numbers_in(quote) if wanted else set()
 
 
 # =================================================================== prompt labels
@@ -275,4 +323,7 @@ def check_report(draft: ReportDraft, sources: list[SourceDraft], checks: list[Ch
     for c in checks:
         quality.claims[c.verdict] = quality.claims.get(c.verdict, 0) + 1
         quality.corroboration[c.corroboration] = quality.corroboration.get(c.corroboration, 0) + 1
+        if c.verdict == "unverifiable" and c.unverifiable_reason:
+            quality.unverifiable_reasons[c.unverifiable_reason] = (
+                quality.unverifiable_reasons.get(c.unverifiable_reason, 0) + 1)
     return quality

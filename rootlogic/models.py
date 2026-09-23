@@ -129,9 +129,13 @@ class ProfileUpdate(Strict):
 
 class ClaimVerdictDraft(Strict):
     claim_number: int = Field(description="The claim's number as given in the prompt.")
-    verdict: Literal["supported", "partially_supported", "unsupported", "no_usable_evidence"]
+    verdict: Literal["supported", "partially_supported", "unsupported", "no_usable_evidence",
+                     "not_a_factual_claim"]
     quote: str = Field(description="A short VERBATIM quote from the evidence that supports the "
                                    "claim; empty string if there is none.")
+    quote_source_url: str = Field(description="The one source URL the quote was copied from, "
+                                              "exactly as labelled in the evidence; empty if "
+                                              "there is no quote.")
     note: str = Field(description="One sentence: what the evidence does or doesn't say.")
 
 
@@ -237,6 +241,9 @@ class Step(BaseModel):
 
 
 Verdict = Literal["supported", "partially_supported", "unsupported", "unverifiable", "unchecked"]
+# Why a claim could not be checked: the page wouldn't read, or the claim isn't checkable at all
+# (an opinion, a prediction). VeriScore separates these; collapsing them blames the fetcher.
+UnverifiableReason = Literal["", "page_unreadable", "not_a_factual_claim"]
 Corroboration = Literal["corroborated", "single_source", "weak", "none"]
 
 
@@ -246,7 +253,9 @@ class CheckedClaim(BaseModel):
     source_urls: list[str]
     verdict: Verdict = "unchecked"
     quote: str = ""
+    quote_url: str = ""          # the one cited page the quote was found in (ALCE-style)
     note: str = ""
+    unverifiable_reason: UnverifiableReason = ""
     corroboration: Corroboration = "none"
     domains: list[str] = []
 
@@ -273,6 +282,18 @@ class ReportQuality(BaseModel):
     policy_drops: int = 0                    # sources removed by the user's source rules
     moderation_warnings: list[str] = []      # sensitive-content flags that didn't block
     moderation_provider: str = ""
+
+    unverifiable_reasons: dict[str, int] = {}   # page_unreadable / not_a_factual_claim -> count
+
+    @property
+    def unverifiable_detail(self) -> str:
+        """Why claims could not be checked, so an unreadable page isn't confused with an
+        opinion that no page could settle."""
+        parts = [(n, label) for key, label in
+                 (("page_unreadable", "page text unavailable"),
+                  ("not_a_factual_claim", "not a checkable claim"))
+                 if (n := self.unverifiable_reasons.get(key, 0))]
+        return ", ".join(f"{n} {label}" for n, label in parts)
 
     @property
     def supported_ratio(self) -> float | None:
@@ -326,7 +347,8 @@ class Report(BaseModel):
                 f"- **Claim verification:** {c.get('supported', 0)} supported, "
                 f"{c.get('partially_supported', 0)} partially supported, "
                 f"{c.get('unsupported', 0)} unsupported (withheld as fact), "
-                f"{c.get('unverifiable', 0)} unverifiable (page text unavailable), "
+                f"{c.get('unverifiable', 0)} unverifiable"
+                + (f" ({u})" if (u := q.unverifiable_detail) else "") + ", "
                 f"{c.get('unchecked', 0)} not checked (budget or verification off)"
                 + (f". {ratio:.0%} of checked claims held up." if ratio is not None else "."))
         k = q.corroboration
@@ -356,10 +378,16 @@ class Report(BaseModel):
             index = {s.url: i for i, s in enumerate(self.sources, start=1)}
             lines += ["## Claim check", "", "| Claim | Verdict | Corroboration | Sources |",
                       "|---|---|---|---|"]
+            starred = any(ch.quote_url for ch in self.checks)
             for ch in self.checks:
-                refs = " ".join(f"[{index[u]}]" for u in ch.source_urls if u in index) or "—"
+                # A star marks the source the verified quote was actually copied from, so the
+                # reader can go straight to it instead of opening every citation on the row.
+                refs = " ".join(f"[{index[u]}]" + ("*" if u == ch.quote_url else "")
+                                for u in ch.source_urls if u in index) or "—"
                 text = ch.text.replace("|", "\\|")
                 lines.append(f"| {text} | {ch.verdict.replace('_', ' ')} | "
                              f"{ch.corroboration.replace('_', ' ')} | {refs} |")
             lines.append("")
+            if starred:
+                lines += ["\\* the cited source the verified quote was copied from.", ""]
         return lines

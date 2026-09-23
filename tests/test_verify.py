@@ -38,9 +38,11 @@ PAGE = ("The survey was published in March by the national statistics agency. Un
 
 
 def verdicts(*items):
-    """Handler returning fixed verdicts: items are (claim_number, verdict, quote)."""
+    """Handler returning fixed verdicts: (claim_number, verdict, quote[, quote_source_url])."""
     return {VerificationDraft: lambda p: VerificationDraft(checks=[
-        ClaimVerdictDraft(claim_number=n, verdict=v, quote=q, note="n") for n, v, q in items])}
+        ClaimVerdictDraft(claim_number=i[0], verdict=i[1], quote=i[2],
+                          quote_source_url=i[3] if len(i) > 3 else "", note="n")
+        for i in items])}
 
 
 # ------------------------------------------------------------------ verification
@@ -201,7 +203,8 @@ def test_report_markdown_includes_confidence_and_claim_table(tmp_path):
                           today=TODAY).run("impact of generative AI on newsrooms")
     md = report.to_markdown()
     assert "## Confidence and limitations" in md and "## Claim check" in md
-    assert "| Figures rose year over year. | supported | single source | [1] |" in md
+    row = next(ln for ln in md.splitlines() if ln.startswith("| Figures rose year over year."))
+    assert "supported" in row and "single source" in row and "[1]*" in row
     assert report.quality.claims == {"supported": 3, "unverifiable": 3}
 
 
@@ -400,3 +403,118 @@ def test_report_sources_show_one_date_format():
     assert display_date("Thu, 19 Mar 2026 00:00:00 GMT") == "2026-03-19"
     assert display_date("2026-03-17") == "2026-03-17"
     assert display_date("sometime in spring") == "sometime in spring"   # shown as it came
+
+
+# ------------------------------------------------------------------ evidence quality
+
+
+def test_a_numeric_claim_needs_its_number_inside_the_quote():
+    """AttrScore documents numbers as a blind spot of attribution checkers: a quote from the
+    right page, about the right topic, with the wrong figure still reads as support."""
+    f = finding("t1", [("Unemployment fell to 7.2% in 2025", ["https://a.gov/r"])],
+                [src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts(
+        (1, "supported", "Unemployment fell to 3.9 percent in 2025")))   # real quote, wrong number
+    verify_findings([f], llm=llm, evidence={"https://a.gov/r": PAGE})
+
+    check = f.checks[0]
+    assert check.verdict == "partially_supported"
+    assert "7.2" in check.note
+
+
+def test_a_numeric_claim_passes_when_the_number_is_in_the_quote():
+    f = finding("t1", [("Unemployment fell to 3.9% in 2025", ["https://a.gov/r"])],
+                [src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts((1, "supported", "Unemployment fell to 3.9 percent in 2025")))
+    verify_findings([f], llm=llm, evidence={"https://a.gov/r": PAGE})
+    assert f.checks[0].verdict == "supported"
+
+
+def test_a_quote_is_attributed_to_the_single_page_it_came_from():
+    """ALCE measures citation precision per citation. With several pages concatenated, a claim
+    citing three sources looks supported when only one of them says anything."""
+    other = ("An unrelated page about transport funding and timetables, long enough to count as "
+             "real page content rather than navigation boilerplate. " * 3)
+    f = finding("t1", [("Unemployment fell to 3.9% in 2025",
+                        ["https://b.org/x", "https://a.gov/r"])],
+                [src("https://b.org/x"), src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts((1, "supported", "Unemployment fell to 3.9 percent in 2025")))
+
+    verify_findings([f], llm=llm,
+                    evidence={"https://b.org/x": other, "https://a.gov/r": PAGE})
+
+    check = f.checks[0]
+    assert check.verdict == "supported"
+    assert check.quote_url == "https://a.gov/r"     # the page the quote is actually in
+
+
+def test_a_claim_that_cannot_be_checked_is_separated_from_an_unreadable_page():
+    """VeriScore distinguishes 'no evidence found' from 'not a checkable claim'. Reporting an
+    opinion as 'unverifiable (page text unavailable)' blames the fetcher for a category error."""
+    f = finding("t1", [("This is the most exciting development in economics",
+                        ["https://a.gov/r"])], [src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts((1, "not_a_factual_claim", "")))
+    verify_findings([f], llm=llm, evidence={"https://a.gov/r": PAGE})
+
+    check = f.checks[0]
+    assert check.verdict == "unverifiable"
+    assert check.unverifiable_reason == "not_a_factual_claim"
+
+
+def test_an_unreadable_page_is_labelled_as_such():
+    f = finding("t1", [("Unemployment fell to 3.9% in 2025", ["https://a.gov/r"])],
+                [src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts((1, "no_usable_evidence", "")))
+    verify_findings([f], llm=llm, evidence={"https://a.gov/r": PAGE})
+
+    check = f.checks[0]
+    assert check.verdict == "unverifiable" and check.unverifiable_reason == "page_unreadable"
+
+
+def test_limitations_line_says_why_claims_were_unverifiable():
+    from rootlogic.models import CheckedClaim, ReportDraft
+    from rootlogic.verify import check_report
+
+    checks = [CheckedClaim(text="a", source_urls=[], verdict="unverifiable",
+                           unverifiable_reason="page_unreadable"),
+              CheckedClaim(text="b", source_urls=[], verdict="unverifiable",
+                           unverifiable_reason="not_a_factual_claim"),
+              CheckedClaim(text="c", source_urls=[], verdict="supported")]
+    draft = ReportDraft(title="t", executive_summary="s", key_takeaways=[], body_markdown="b",
+                        open_questions=[], related_topics=[])
+
+    quality = check_report(draft, [src("https://a.gov/r")], checks)
+
+    assert quality.unverifiable_reasons == {"page_unreadable": 1, "not_a_factual_claim": 1}
+    assert quality.unverifiable_detail == "1 page text unavailable, 1 not a checkable claim"
+
+
+def test_claim_table_marks_the_source_the_quote_came_from(tmp_path):
+    """"Which source actually backs this?" should be answerable at a glance: the cited source
+    carrying the verified quote is marked, not just listed among the claim's citations."""
+    from rootlogic.models import (Analysis, CheckedClaim, Report, ReportDraft,
+                                  ReportQuality)
+
+    checks = [CheckedClaim(text="Unemployment fell to 3.9% in 2025",
+                           source_urls=["https://b.org/x", "https://a.gov/r"],
+                           verdict="supported", quote="Unemployment fell to 3.9 percent",
+                           quote_url="https://a.gov/r", corroboration="single_source")]
+    draft = ReportDraft(title="t", executive_summary="s", key_takeaways=[], body_markdown="b",
+                        open_questions=[], related_topics=[])
+    report = Report(session_id="s", draft=draft,
+                    analysis=Analysis(consensus=[], contradictions=[]),
+                    sources=[src("https://b.org/x"), src("https://a.gov/r")], checks=checks,
+                    quality=ReportQuality(claims={"supported": 1}))
+
+    table = [ln for ln in report.to_markdown().splitlines() if "Unemployment fell" in ln]
+    assert table and "[2]*" in table[0]      # source 2 carries the quote; source 1 does not
+    assert "[1]" in table[0]
+
+
+def test_a_claim_with_no_page_text_records_why_it_was_unverifiable():
+    """The 'no usable page text' path set the verdict but no reason, so the limitations line
+    said '3 unverifiable' with no explanation."""
+    f = finding("t1", [("Wages doubled", ["https://a.gov/r"])], [src("https://a.gov/r")])
+    verify_findings([f], llm=FakeLLM(), evidence={})       # nothing fetched, nothing cached
+    assert f.checks[0].verdict == "unverifiable"
+    assert f.checks[0].unverifiable_reason == "page_unreadable"

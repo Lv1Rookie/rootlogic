@@ -111,12 +111,15 @@ PRIMARY_PAGE = (
 
 
 def default_verification(prompt: str) -> VerificationDraft:
-    """Supports each claim with the first sentence of its evidence (a real verbatim quote)."""
+    """Supports each claim with the first sentence of its evidence (a real verbatim quote),
+    attributed to the source the evidence block was labelled with."""
     checks = []
-    for m in re.finditer(r"Claim (\d+): .*?\n<<<\n(.*?)\n>>>", prompt, re.S):
-        quote = m.group(2).split(". ")[0][:120]
+    for m in re.finditer(r"Claim (\d+): .*?\nEvidence \(source: (\S+?)\):\n<<<\n(.*?)\n>>>",
+                         prompt, re.S):
+        quote = m.group(3).split(". ")[0][:120]
         checks.append(ClaimVerdictDraft(claim_number=int(m.group(1)), verdict="supported",
-                                        quote=quote, note="Evidence states it."))
+                                        quote=quote, quote_source_url=m.group(2),
+                                        note="Evidence states it."))
     return VerificationDraft(checks=checks)
 
 
