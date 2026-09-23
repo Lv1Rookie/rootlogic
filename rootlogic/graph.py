@@ -87,12 +87,13 @@ class ResearchState(TypedDict, total=False):
 
 
 class ResearchGraph:
-    def __init__(self, llm: LLM, store: Store, ui: Interaction, *, checkpoint_path: str | Path,
+    def __init__(self, llm: LLM, store: Store, ui: Interaction, *, worker_llm: LLM | None = None, checkpoint_path: str | Path,
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
                  today: date | None = None, blocked_domains: tuple[str, ...] = (),
                  use_profile: bool = True, source_policy: SourcePolicy | None = None,
                  moderator: Moderator | None = None):
-        self.llm = llm
+        self.llm = llm                      # planning, reflection, analysis, writing, verifying
+        self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
         self.ui = ui
         self.budget = budget or Budget()
@@ -308,7 +309,7 @@ class ResearchGraph:
         deps = [Finding.model_validate(d) for d in payload["deps"]]
         prompt = ctx.research_prompt(plan, task, self.today, payload["context"], deps)
         try:
-            draft, hits = self.llm.research(purpose=f"research:{task.id}",
+            draft, hits = self.worker.research(purpose=f"research:{task.id}",
                                             system=prompts.RESEARCHER, prompt=prompt,
                                             schema=FindingDraft,
                                             max_searches=self.budget.max_searches,
@@ -374,7 +375,7 @@ class ResearchGraph:
             self._emit("verify.started", "Checking claims against their cited pages")
         else:  # still label corroboration (pure code) and mark every claim unchecked
             self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
-        search = getattr(self.llm, "search", None)
+        search = getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
         fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
             if search is not None else None
         evidence = dict(s.get("evidence", {}))

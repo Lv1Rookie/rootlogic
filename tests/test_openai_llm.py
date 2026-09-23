@@ -239,3 +239,73 @@ def test_missing_choices_without_an_error_message_suggests_what_to_try():
     llm, _, _ = make([empty_completion()])
     with pytest.raises(LLMError, match="try another --model, or --no-strict"):
         llm.structured(purpose="plan", system="s", prompt="p", schema=Clarification)
+
+
+# ------------------------------------------------------------------ worker model split
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_research_uses_the_worker_model_and_everything_else_the_lead(tmp_path, kind):
+    """Sub-agents make most of the calls and burn most of the tokens (330k of 636k in one live
+    run), so they can run on a cheaper model than planning, analysis and writing."""
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.orchestrator import Orchestrator
+    from rootlogic.store import Store
+
+    from .test_orchestrator import TODAY, ScriptedUI
+
+    lead, worker = FakeLLM(), FakeLLM()
+    ui = ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY, worker_llm=worker)
+    engine = (ResearchGraph(lead, Store(), ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(lead, Store(), ui, **kw))
+    assert engine.run("impact of generative AI on newsrooms") is not None
+
+    assert all(p.startswith("research:") for p, _ in worker.calls)
+    assert {p.split(":")[0] for p, _ in lead.calls} == {"clarify", "plan", "reflect", "verify",
+                                                        "analyze", "report"}
+
+
+def test_without_a_worker_model_everything_runs_on_one_llm(tmp_path):
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.orchestrator import Orchestrator
+    from rootlogic.store import Store
+
+    from .test_orchestrator import TODAY, ScriptedUI
+
+    llm = FakeLLM()
+    Orchestrator(llm, Store(), ScriptedUI(), reports_dir=tmp_path, today=TODAY).run(
+        "impact of generative AI on newsrooms")
+    assert any(p.startswith("research:") for p, _ in llm.calls)
+
+
+def test_backend_builds_a_cheaper_worker_client(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    plain = Backend()
+    assert plain.make_worker_llm(lambda u: None) is None        # no split configured
+    assert "workers" not in plain.label
+
+    split = Backend(model="claude-opus-5", worker_model="claude-haiku-4-5")
+    assert split.make_llm(lambda u: None).model == "claude-opus-5"
+    assert split.make_worker_llm(lambda u: None).model == "claude-haiku-4-5"
+    assert "workers: claude-haiku-4-5" in split.label
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")   # the client needs some credential
+    priced = Backend(provider="openai", model="big", worker_model="small", search="tavily",
+                     moderation="none", prices=(5.0, 25.0), worker_prices=(0.25, 2.0))
+    assert priced.make_worker_llm(lambda u: None).prices == (0.25, 2.0)
+    assert priced.make_llm(lambda u: None).prices == (5.0, 25.0)
+
+
+def test_cli_wires_the_worker_model_through(tmp_path, monkeypatch):
+    from rootlogic.cli import backend_from_args, main
+    import argparse
+    args = argparse.Namespace(worker_model="claude-haiku-4-5", worker_prices="0.25,2",
+                              model="claude-opus-5")
+    b = backend_from_args(args)
+    assert b.worker_model == "claude-haiku-4-5" and b.worker_prices == (0.25, 2.0)
+    # offline runs ignore the split (one fake model), but the flag must parse and not crash
+    assert main(["--db", str(tmp_path / "x.db"), "research", "--offline", "-y",
+                 "--worker-model", "claude-haiku-4-5",
+                 "impact of generative AI on newsrooms"]) == 0

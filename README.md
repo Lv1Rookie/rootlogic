@@ -47,7 +47,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 171 tests, no network
+pytest                       # 176 tests, no network
 ```
 
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
@@ -64,6 +64,11 @@ tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in w
 `--block DOMAIN` / `--only DOMAIN` (repeatable) apply source rules to one run.
 `--verify-claims N` sets how many claims are checked against their pages (default 12), and
 `--no-verify` turns checking off.
+`--worker-model MODEL` runs the research sub-agents on a cheaper model while planning,
+reflection, analysis, verification and writing stay on `--model`. Sub-agents make most of the
+calls and burn most of the tokens (330k of 636k in one live run), so this is the biggest cost
+lever: `--model claude-opus-5 --worker-model claude-haiku-4-5`. `rootlogic usage` shows the
+per-model split, and `--worker-prices IN,OUT` prices a non-Claude worker.
 Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
 
 ## How it maps to the assignment
@@ -138,6 +143,9 @@ makes the agent both autonomous and testable, and keeps cost bounded.
   swapping providers or adding LangGraph later touches one file.
 - **Structured outputs everywhere the orchestrator branches** (clarify/plan/reflect/analyze/report),
   so control flow never parses free text.
+- **Cheap workers, strong lead**: research sub-agents do the bulk of the calls on the
+  reading-heavy work, so `--worker-model` puts them on a cheaper model while judgement-heavy
+  steps (plan, reflect, analyze, verify, write) stay on the better one.
 - **Sub-agents get isolated context**: each research worker sees only its question, the
   objective, user guidance and dependency results — not the whole run. Results come back as
   a compact `FindingDraft`, keeping the orchestrator's context small.

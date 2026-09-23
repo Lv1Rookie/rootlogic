@@ -149,20 +149,24 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
         web_searches=u.web_searches, cost_usd=u.cost_usd, stop_reason=u.stop_reason,
         request_id=u.request_id)
 
+    worker_llm = None
     if offline:
         from .fake_llm import FakeLLM
         llm = FakeLLM(usage_sink)
     else:
         llm = (backend or Backend()).make_llm(usage_sink)
+        worker_llm = (backend or Backend()).make_worker_llm(usage_sink)
 
     moderator = None if offline else (backend or Backend()).make_moderator()
     if engine == "graph":
         from .graph import ResearchGraph
-        eng = ResearchGraph(llm, store, ui, checkpoint_path=home / "checkpoints.db",
+        eng = ResearchGraph(llm, store, ui, worker_llm=worker_llm,
+                            checkpoint_path=home / "checkpoints.db",
                             budget=budget, reports_dir=home / "reports", use_profile=use_profile,
                             source_policy=source_policy, moderator=moderator)
     else:
-        eng = Orchestrator(llm, store, ui, budget=budget, reports_dir=home / "reports",
+        eng = Orchestrator(llm, store, ui, worker_llm=worker_llm, budget=budget,
+                           reports_dir=home / "reports",
                            use_profile=use_profile, source_policy=source_policy,
                            moderator=moderator)
     holder["e"] = eng
@@ -443,6 +447,11 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
                    help="openai provider: for servers without strict JSON-schema support")
     g.add_argument("--prices", metavar="IN,OUT",
                    help="openai provider: USD per million input,output tokens for cost tracking")
+    g.add_argument("--worker-model", metavar="MODEL",
+                   help="cheaper model for research sub-agents, which make most of the calls "
+                        "(e.g. claude-haiku-4-5); planning, analysis and writing stay on --model")
+    g.add_argument("--worker-prices", metavar="IN,OUT",
+                   help="cost tracking for --worker-model (openai provider)")
     g.add_argument("--search", choices=["anthropic", "tavily"], default="anthropic",
                    help="web search for sub-agents: Claude's built-in tools, or Tavily via our "
                         "own SearchProvider tools (needs TAVILY_API_KEY)")
@@ -470,7 +479,9 @@ def add_quality_args(p: argparse.ArgumentParser) -> None:
 
 
 def backend_from_args(args: argparse.Namespace) -> Backend:
-    return Backend(moderation=getattr(args, "moderation", "auto"),
+    return Backend(worker_model=getattr(args, "worker_model", None),
+                   worker_prices=parse_prices(getattr(args, "worker_prices", None)),
+                   moderation=getattr(args, "moderation", "auto"),
                    moderation_model=getattr(args, "moderation_model", None),
                    moderation_base_url=getattr(args, "moderation_base_url", None),
                    moderation_strict=getattr(args, "moderation_strict", False),

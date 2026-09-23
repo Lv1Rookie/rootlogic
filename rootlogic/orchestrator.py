@@ -42,11 +42,12 @@ class Budget:
 
 
 class Orchestrator:
-    def __init__(self, llm: LLM, store: Store, ui: Interaction, *, budget: Budget | None = None,
+    def __init__(self, llm: LLM, store: Store, ui: Interaction, *, worker_llm: LLM | None = None, budget: Budget | None = None,
                  reports_dir: Path | str = "reports", today: date | None = None,
                  blocked_domains: tuple[str, ...] = (), use_profile: bool = True,
                  source_policy: SourcePolicy | None = None, moderator: Moderator | None = None):
-        self.llm = llm
+        self.llm = llm                      # planning, reflection, analysis, writing, verifying
+        self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
         self.ui = ui
         self.budget = budget or Budget()
@@ -230,7 +231,7 @@ class Orchestrator:
         """Runs in a worker thread: only calls the LLM, never the UI or shared state."""
         deps = [self.findings[d] for d in task.depends_on if d in self.findings]
         prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
-        return self.llm.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
+        return self.worker.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
                                  prompt=prompt, schema=FindingDraft,
                                  max_searches=self.budget.max_searches,
                                  recency_days=plan.recency_days)
@@ -296,7 +297,7 @@ class Orchestrator:
             self._emit("verify.started", "Checking claims against their cited pages")
         else:  # still label corroboration (pure code) and mark every claim unchecked
             self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
-        search = getattr(self.llm, "search", None)
+        search = getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
         fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
             if search is not None else None
         result = verify.verify_findings(list(self.findings.values()), llm=self.llm,

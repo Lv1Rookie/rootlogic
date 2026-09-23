@@ -27,6 +27,8 @@ class Backend:
     zdr: bool = False                    # Claude hosted web tools in Zero-Data-Retention mode
     strict: bool = True                  # strict JSON-schema outputs/tools (openai provider)
     prices: tuple[float, float] | None = None  # $/MTok (input, output) for non-Claude models
+    worker_model: str | None = None      # cheaper model for research sub-agents (same provider)
+    worker_prices: tuple[float, float] | None = None
     moderation: str = "auto"             # auto | none | openai | llama-guard
     moderation_model: str | None = None  # llama-guard: model id (default llama-guard3)
     moderation_base_url: str | None = None
@@ -67,7 +69,8 @@ class Backend:
     def label(self) -> str:
         model = self.model or (MODEL if self.provider == "anthropic" else "?")
         where = f" @ {self.base_url}" if self.base_url else ""
-        return (f"{self.provider}:{model}{where} · search: {self.search} · moderation: "
+        worker = f" · workers: {self.worker_model}" if self.worker_model else ""
+        return (f"{self.provider}:{model}{where}{worker} · search: {self.search} · moderation: "
                 f"{self.resolved_moderation()}")
 
     def make_moderator(self) -> Moderator | None:
@@ -82,17 +85,23 @@ class Backend:
             base_url=self.moderation_base_url or self.base_url or "http://localhost:11434/v1",
             model=self.moderation_model or "llama-guard3", strict=self.moderation_strict)
 
-    def make_llm(self, usage_sink: UsageSink):
+    def make_llm(self, usage_sink: UsageSink, *, worker: bool = False):
+        """The lead model, or (``worker=True``) the cheaper one the research sub-agents use."""
         from .search import get_search_provider
         self.validate()
         search = get_search_provider(self.search)
+        model = (self.worker_model or self.model) if worker else self.model
+        prices = (self.worker_prices or self.prices) if worker else self.prices
         if self.provider == "openai":
             from .openai_llm import OpenAICompatibleLLM
-            return OpenAICompatibleLLM(usage_sink, model=self.model, search=search,
-                                       base_url=self.base_url, strict=self.strict,
-                                       prices=self.prices)
+            return OpenAICompatibleLLM(usage_sink, model=model, search=search,
+                                       base_url=self.base_url, strict=self.strict, prices=prices)
         from .llm import AnthropicLLM
-        return AnthropicLLM(usage_sink, model=self.model or MODEL, zdr=self.zdr, search=search)
+        return AnthropicLLM(usage_sink, model=model or MODEL, zdr=self.zdr, search=search)
+
+    def make_worker_llm(self, usage_sink: UsageSink):
+        """None when no separate worker model is configured: engines then reuse the lead."""
+        return self.make_llm(usage_sink, worker=True) if self.worker_model else None
 
 
 def parse_prices(text: str | None) -> tuple[float, float] | None:
