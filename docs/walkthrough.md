@@ -254,7 +254,7 @@ check that:
   unscreened by accident.
 
 Most scenarios run on **both** engines. When a bug is fixed, a test that failed before the fix
-is added first. All 176 tests run in a few seconds with no internet.
+is added first. All 209 tests run in a few seconds with no internet.
 
 ## Step 12: Terminal UI → [`cli.py`](../rootlogic/cli.py)
 
@@ -545,12 +545,70 @@ Every change went through the same routine:
 
 ---
 
+## Step 21: Run it for real, on a laptop, for free
+
+176 mocked tests passed before the first live run. Then every real run broke something new.
+Nine defects came out of live testing, none of them reachable by the test suite as it stood,
+and each one is now covered by a test that fails against the old code.
+
+| What broke | Why the tests missed it | Fix |
+|---|---|---|
+| Sub-agents were silent for minutes; a hang and real work looked identical | no test watches timing | emit `subagent.search` / `subagent.fetch` per action |
+| A thinking model spent 72s reasoning before a 1.3s answer | fakes don't think | `--reasoning-effort` |
+| An 8B model stopped calling tools and wrote prose for ten turns | fakes always call the tool | stop after two, and take valid findings out of prose |
+| The same model could not emit a large tool schema at all | as above | submit through grammar-constrained structured output instead |
+| Tavily dates are RFC 1123; `parse_date` knew three other formats | fixtures used ISO | parse it, so the recency filter actually fires |
+| Verification crashed the moment it fetched a cited page | Claude's hosted path sets `search=None`, so the fetcher was never built | a real function, plus tests that attach a provider |
+| A 1B Llama Guard flagged a newsroom report as violent crime and binned it | `StaticModerator` never false-positives | say how to recover the research |
+| A backgrounded run died on its first clarifying question | tests answer prompts | treat closed stdin as "no answer" |
+| A gateway timed out on every substantial call | nothing sat between us and the model | `--stream`, and catch the base `APIError` |
+
+Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
+path — a graded requirement, passing its unit tests, doing nothing in production, because
+every date arrived in a format the parser returned `None` for and `None` means "unknown age".
+**Verification crashed after all the research was done**, on this line:
+
+```python
+fetch = lambda url: (p := search.fetch(url)).text if not p.error else None
+```
+
+A conditional expression evaluates its condition first, so `not p.error` ran before the walrus
+bound `p`. It could never have worked, and no mocked test built that lambda at all.
+
+The pattern worth taking away: **the tests all took the same path through the code.** Claude's
+hosted tools mean `search is None`, which skipped the client-side search branch, the fetcher,
+the date formats a real provider returns, and every failure mode of a model that isn't Claude.
+A second backend was not just a portability feature; it was the thing that exposed the first
+one's blind spots.
+
+Running locally made this affordable. `ollama pull qwen3:8b`, `--search tavily`, and a
+laptop — three reports, dozens of runs, $0. The same pipeline on Claude costs about $0.30 a
+run after the caching and worker-model work, and produces better judgement: the local model
+rated an SEO listicle "high credibility" and invented a contradiction between two unrelated
+facts. The machinery is sound either way; the judgement is only as good as the model behind it.
+
+---
+
 ## What to do next
 
-1. **Get an API key** at console.anthropic.com. Run `export ANTHROPIC_API_KEY=...`, then
-   `rootlogic research "a topic you know well"`. The live Claude and Tavily paths haven't been
-   run yet, so the first real run may surface small fixes. The same goes for the
-   OpenAI-compatible adapter. Trying it free with Ollama is a good first test.
+1. **Run it.** Free and local, which is how Step 21's nine defects were found:
+
+   ```bash
+   brew install ollama && ollama serve          # or: brew services start ollama
+   ollama pull qwen3:8b
+   export TAVILY_API_KEY=tvly-...               # free tier is plenty
+   rootlogic research --provider openai --base-url http://localhost:11434/v1 \
+       --model qwen3:8b --reasoning-effort none --search tavily --moderation none \
+       --searches 2 --verify-claims 12 "a topic you know well"
+   ```
+
+   For the best output, Claude instead — one env var, and it keeps hosted web search, prompt
+   caching and refusal fallback that no OpenAI-compatible hop can carry:
+
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...
+   rootlogic research --worker-model claude-haiku-4-5 "a topic you know well"
+   ```
 2. **Read the code in this order:** `models.py` → `orchestrator.py` (start with `run()`) →
    `llm.py` → `filters.py` → `context.py` → `continuity.py` → `search.py` → `tools.py` →
    `openai_llm.py` → `verify.py` → `moderation.py` → `evaluate.py` → the tests → `graph.py` →
@@ -570,6 +628,11 @@ Every change went through the same routine:
      topic stops at `session.blocked` before any model call.
    - `--engine graph`: kill it mid-run, then `rootlogic resume <id>`.
    - `rootlogic web`: the same flow in the browser, including refresh mid-run.
+   - The `subagent.search` / `subagent.fetch` lines as they appear: the queries are the
+     model's own, and a failing provider names its error in the log rather than going quiet.
+   - Two backends on the same topic side by side. The pipeline behaves identically; the
+     judgement does not, which is the honest thing to say about where an agent's quality
+     comes from.
 4. **Be ready to explain:**
    - The LLM-decides-what / code-decides-how split.
    - Why structured outputs matter.
