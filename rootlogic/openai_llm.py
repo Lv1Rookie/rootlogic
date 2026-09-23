@@ -26,7 +26,8 @@ from typing import TypeVar
 import openai
 from pydantic import BaseModel, ValidationError
 
-from .llm import AgentRefusal, AuthError, LLMError, Usage, UsageSink, json_schema
+from .llm import (AgentRefusal, AuthError, LLMError, StepSink, Usage, UsageSink,
+                  json_schema)
 from .models import SearchHit
 from .search import SearchProvider
 from .tools import NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
@@ -114,8 +115,10 @@ class OpenAICompatibleLLM:
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
-        box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days)
+                 max_searches: int = 8, recency_days: int = 0,
+                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]:
+        box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days,
+                         on_step=on_step)
         specs = WEB_TOOL_SPECS + [("submit_findings", SUBMIT_DESCRIPTION, json_schema(schema))]
         tools = [{"type": "function", "function": {
             "name": n, "description": d, "parameters": p, **({"strict": True} if self.strict else {})}}

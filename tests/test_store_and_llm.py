@@ -223,3 +223,56 @@ def test_billing_failure_stops_the_run_instead_of_retrying(tmp_path, kind):
         engine.run("impact of generative AI on newsrooms")
     assert "task.retry" not in ui.types()
     assert store.session(engine.sid)["status"] == "failed"
+
+
+def test_hosted_tool_loop_reports_each_search_and_fetch():
+    """Claude runs hosted searches inside the request: the query only appears in the
+    ``server_tool_use`` block, paired with its result by ``tool_use_id``."""
+    from rootlogic.models import FindingDraft
+
+    def turn(blocks, stop):
+        usage = SimpleNamespace(input_tokens=10, output_tokens=5, cache_read_input_tokens=0,
+                                cache_creation_input_tokens=0, server_tool_use=None)
+        return SimpleNamespace(content=blocks, stop_reason=stop, usage=usage,
+                               model="claude-opus-5")
+
+    page = SimpleNamespace(type="web_fetch_result", url="https://a.com/r",
+                           content=SimpleNamespace(title="R",
+                                                   source=SimpleNamespace(type="text", data="t")))
+    first = [
+        SimpleNamespace(type="server_tool_use", id="s1", name="web_search",
+                        input={"query": "newsroom AI 2026"}),
+        SimpleNamespace(type="web_search_tool_result", tool_use_id="s1", content=[
+            SimpleNamespace(url="https://a.com/r", title="R", page_age="1 day ago"),
+            SimpleNamespace(url="https://b.com/r", title="R2", page_age=None)]),
+        SimpleNamespace(type="server_tool_use", id="s2", name="web_fetch",
+                        input={"url": "https://a.com/r"}),
+        SimpleNamespace(type="web_fetch_tool_result", tool_use_id="s2", content=page),
+        SimpleNamespace(type="server_tool_use", id="s3", name="web_search",
+                        input={"query": "too many"}),
+        SimpleNamespace(type="web_search_tool_result", tool_use_id="s3",
+                        content=SimpleNamespace(type="web_search_tool_result_error",
+                                                error_code="max_uses_exceeded")),
+    ]
+    finding = {"answer": "a", "sources": [], "claims": [], "gaps": [], "confidence": "low"}
+    done = [SimpleNamespace(type="tool_use", name="submit_findings", input=finding, id="x")]
+
+    class Scripted:
+        def __init__(self):
+            self.turns = [turn(first, "pause_turn"), turn(done, "tool_use")]
+
+        def create(self, **kw):
+            return self.turns.pop(0)
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=Scripted()))
+    llm = AnthropicLLM(lambda u: None, client=client)  # type: ignore[arg-type]
+
+    steps = []
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 on_step=steps.append)
+
+    assert [(s.kind, s.detail, s.results, s.ok) for s in steps] == [
+        ("search", "newsroom AI 2026", 2, True),
+        ("fetch", "https://a.com/r", 1, True),
+        ("search", "too many", 0, False),
+    ]

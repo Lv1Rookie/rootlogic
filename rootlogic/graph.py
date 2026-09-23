@@ -44,7 +44,7 @@ from .filters import SourcePolicy
 from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
 from .control import Command as UserCommand
-from .control import Control, Event, Interaction
+from .control import Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
                      Report, ReportDraft, SearchHit, SubTask, SubTaskDraft)
@@ -310,10 +310,11 @@ class ResearchGraph:
         prompt = ctx.research_prompt(plan, task, self.today, payload["context"], deps)
         try:
             draft, hits = self.worker.research(purpose=f"research:{task.id}",
-                                            system=prompts.RESEARCHER, prompt=prompt,
-                                            schema=FindingDraft,
-                                            max_searches=self.budget.max_searches,
-                                            recency_days=plan.recency_days)
+                                               system=prompts.RESEARCHER, prompt=prompt,
+                                               schema=FindingDraft,
+                                               max_searches=self.budget.max_searches,
+                                               recency_days=plan.recency_days,
+                                               on_step=self._step_reporter(task.id))
         except AuthError:
             raise   # credentials or billing: every other call will fail too
         except (LLMError, AgentRefusal) as e:
@@ -536,6 +537,14 @@ class ResearchGraph:
         if notes:
             update["context"] = notes
         return update
+
+    def _step_reporter(self, task_id: str):
+        """Report a sub-agent's searches as they happen. Nodes fanned out with Send run in
+        their own threads; ``_emit`` only touches the (locked) store and the UI."""
+        def report(step) -> None:
+            type_, message, data = step_event(task_id, step)
+            self._emit(type_, message, **data)
+        return report
 
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:

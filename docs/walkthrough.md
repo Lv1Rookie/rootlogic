@@ -173,6 +173,24 @@ calls an `Interaction` object for four things: `ask`, `review_plan`, `override` 
 - Ctrl-C only sets a "pause" flag. The orchestrator checks it between waves, so it never
   stops halfway through a step.
 
+**Sub-agents report as they work.** A first live run showed the weakness of coarse events: after
+three `task.started` lines the screen sat still for minutes, with no way to tell research from a
+hang. `LLM.research(on_step=...)` now reports every search and page fetch while it happens, and
+both engines turn those into `subagent.search` / `subagent.fetch` events tagged with the task id:
+
+```
+14:22:07 task.started       [t2] Researching: What does the evidence say about job losses?
+14:22:19 subagent.search    [t2] Searched “newsroom layoffs AI 2026” — 5 result(s)
+14:22:41 subagent.fetch     [t2] Read https://www.pewresearch.org/…
+14:23:08 task.done          [t2] Done: 4 sources kept, 2 dropped, confidence medium
+```
+
+Two details worth knowing. With Claude's hosted tools the searches run inside Anthropic's
+request, so the query has to be recovered from the `server_tool_use` block and paired with its
+result by `tool_use_id`; with a `SearchProvider` the toolbox reports them directly. And the
+callback is wrapped in a `try`: a UI that has gone away must never fail a sub-task that is
+otherwise working.
+
 ## Step 9: Storage → [`store.py`](../rootlogic/store.py)
 
 One SQLite file holds nine tables. All except `preferences` and `source_rules` are keyed by session:

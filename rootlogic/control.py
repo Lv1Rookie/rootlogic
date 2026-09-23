@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
-from .models import Plan
+from .models import Plan, Step
 
 Action = Literal["continue", "skip", "add", "note", "stop", "abort"]
 
@@ -62,3 +62,18 @@ class Control:
 
     def clear(self) -> None:
         self._pause.clear()
+
+
+def step_event(task_id: str, step: Step) -> tuple[str, str, dict]:
+    """A sub-agent's search or fetch as (event type, message, data) for the action log.
+
+    Both engines report sub-agent progress the same way, so the wording lives here once.
+    """
+    if step.kind == "search":
+        outcome = f"{step.results} result(s)" if step.ok else "search failed"
+        return ("subagent.search",
+                f"[{task_id}] Searched \u201c{step.detail}\u201d \u2014 {outcome}",
+                {"task": task_id, "query": step.detail, "results": step.results})
+    verb = "Read" if step.ok else "Could not read"
+    return ("subagent.fetch", f"[{task_id}] {verb} {step.detail}",
+            {"task": task_id, "url": step.detail})

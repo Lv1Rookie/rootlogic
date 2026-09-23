@@ -181,3 +181,46 @@ def test_engines_pass_plan_recency_to_research(tmp_path):
     Orchestrator(Recording(), Store(), ScriptedUI(), reports_dir=tmp_path, today=TODAY).run(
         "impact of generative AI on newsrooms")
     assert seen and set(seen) == {365}
+
+
+# ------------------------------------------------------------------ live progress
+
+
+def test_client_tool_loop_reports_each_search_and_fetch():
+    """A sub-agent is otherwise silent between task.started and task.done. Every search and
+    fetch it runs must be reported as it happens, including the ones that fail."""
+    search = StaticSearch(
+        results=[SearchResult(url="https://a.com/r", title="Report", snippet="s")],
+        pages={"https://a.com/r": "full text"})
+    llm, _ = make_llm([
+        [tool_use("web_search", {"query": "newsroom AI 2026"}, "u1")],
+        [tool_use("web_fetch", {"url": "https://a.com/r"}, "u2")],
+        [tool_use("web_fetch", {"url": "https://gone.example/404"}, "u3")],
+        [tool_use("submit_findings", FINDING, "u4")],
+    ], search)
+
+    steps = []
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 on_step=steps.append)
+
+    assert [(s.kind, s.detail, s.results, s.ok) for s in steps] == [
+        ("search", "newsroom AI 2026", 1, True),
+        ("fetch", "https://a.com/r", 1, True),
+        ("fetch", "https://gone.example/404", 0, False),
+    ]
+
+
+def test_a_failing_progress_observer_does_not_fail_the_sub_task():
+    """Progress reporting is a UI nicety; research it is watching must still finish."""
+    search = StaticSearch(results=[SearchResult(url="https://a.com/r", title="R", snippet="s")])
+    llm, _ = make_llm([
+        [tool_use("web_search", {"query": "q"}, "u1")],
+        [tool_use("submit_findings", FINDING, "u2")],
+    ], search)
+
+    def boom(step):
+        raise RuntimeError("the UI went away")
+
+    finding, _ = llm.research(purpose="research:t1", system="s", prompt="p",
+                              schema=FindingDraft, on_step=boom)
+    assert finding.confidence == "medium"

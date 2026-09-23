@@ -19,7 +19,7 @@ from typing import Callable, Protocol, TypeVar
 import anthropic
 from pydantic import BaseModel
 
-from .models import SearchHit
+from .models import SearchHit, Step
 from .search import SearchProvider, clip
 from .tools import MAX_FETCHES, NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
 
@@ -66,6 +66,8 @@ class Usage:
 
 
 UsageSink = Callable[[Usage], None]
+StepSink = Callable[[Step], None]
+"""Called as a sub-agent searches and fetches, so the action log can show it live."""
 
 
 class AgentRefusal(RuntimeError):
@@ -85,7 +87,8 @@ class LLM(Protocol):
                    effort: str = "high") -> T: ...
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]: ...
+                 max_searches: int = 8, recency_days: int = 0,
+                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]: ...
 
 
 def json_schema(model: type[BaseModel]) -> dict:
@@ -176,14 +179,15 @@ class AnthropicLLM:
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 8, recency_days: int = 0,
+                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]:
         submit_tool = {"name": "submit_findings", "description": SUBMIT_DESCRIPTION,
                        "strict": True, "input_schema": json_schema(schema)}
         if self.search is None:
             return self._research_server_tools(purpose, system, prompt, schema, submit_tool,
-                                               max_searches)
+                                               max_searches, on_step)
         return self._research_client_tools(purpose, system, prompt, schema, submit_tool,
-                                           max_searches, recency_days)
+                                           max_searches, recency_days, on_step)
 
     @staticmethod
     def _submitted(response, schema: type[T]) -> T | None:
@@ -195,7 +199,7 @@ class AnthropicLLM:
         return schema.model_validate(data)
 
     def _research_server_tools(self, purpose, system, prompt, schema, submit_tool,
-                               max_searches) -> tuple:
+                               max_searches, on_step=None) -> tuple:
         """Claude's hosted web tools: Anthropic runs searches inside the request."""
         web_tools = [
             {"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches},
@@ -220,6 +224,7 @@ class AnthropicLLM:
                                     cache_control={"type": "ephemeral"})
             new_hits = _search_hits(response.content)
             hits.extend(new_hits)
+            _report(on_step, _steps(response.content))
             if (found := self._submitted(response, schema)) is not None:
                 return found, hits
 
@@ -240,10 +245,11 @@ class AnthropicLLM:
         raise LLMError(f"{purpose}: research did not converge")
 
     def _research_client_tools(self, purpose, system, prompt, schema, submit_tool,
-                               max_searches, recency_days) -> tuple:
+                               max_searches, recency_days, on_step=None) -> tuple:
         """Our own web tools backed by ``self.search``: portable to any tool-calling model."""
         assert self.search is not None
-        box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days)
+        box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days,
+                         on_step=on_step)
         tools = [{"name": n, "description": d, "strict": True, "input_schema": p}
                  for n, d, p in WEB_TOOL_SPECS] + [submit_tool]
         messages: list[dict] = [{"role": "user", "content": prompt}]
@@ -290,6 +296,48 @@ def _search_hits(content) -> list[SearchHit]:
                 hits.append(SearchHit(url=url, title=getattr(r, "title", "") or "",
                                       page_age=getattr(r, "page_age", None)))
     return hits
+
+
+def _steps(content) -> list[Step]:
+    """What the sub-agent did this turn, for the action log: one Step per hosted tool call.
+
+    Claude reports the call (``server_tool_use``, which carries the query or URL) and its
+    outcome (``*_tool_result``) as separate blocks, paired by ``tool_use_id``.
+    """
+    asked = {b.id: b for b in content if b.type == "server_tool_use"}
+    steps = []
+    for block in content:
+        if block.type not in ("web_search_tool_result", "web_fetch_tool_result"):
+            continue
+        call = asked.get(getattr(block, "tool_use_id", None))
+        if block.type == "web_search_tool_result":
+            results = block.content if isinstance(block.content, list) else []
+            steps.append(Step(kind="search", detail=_tool_input(call, "query"),
+                              results=len(results), ok=isinstance(block.content, list)))
+            continue
+        ok = getattr(block.content, "type", None) == "web_fetch_result"
+        url = getattr(block.content, "url", None) or _tool_input(call, "url")
+        steps.append(Step(kind="fetch", detail=url, results=1 if ok else 0, ok=ok))
+    return steps
+
+
+def _tool_input(call, key: str) -> str:
+    """The query or URL Claude passed to a hosted tool, if the response reported it."""
+    if call is None:
+        return "(not reported)"
+    args = call.input if isinstance(call.input, dict) else json.loads(call.input or "{}")
+    return str(args.get(key) or "(not reported)")
+
+
+def _report(on_step: StepSink | None, steps: list[Step]) -> None:
+    """A broken observer must not fail a sub-task that is otherwise working."""
+    if on_step is None:
+        return
+    for step in steps:
+        try:
+            on_step(step)
+        except Exception:  # noqa: BLE001 - progress reporting is never worth losing research
+            pass
 
 
 def _tool_errors(content) -> set[str]:

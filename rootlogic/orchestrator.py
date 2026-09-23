@@ -18,7 +18,7 @@ from . import continuity, verify
 from .filters import SourcePolicy
 from .moderation import Blocked, ModerationGate, Moderator
 from . import prompts
-from .control import Command, Control, Event, Interaction
+from .control import Command, Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
                      Report, ReportDraft, SubTask, SubTaskDraft)
@@ -228,13 +228,22 @@ class Orchestrator:
         self._emit("task.failed", f"[{task.id}] Failed: {reason}", task=task.id)
 
     def _research_task(self, plan: Plan, task: SubTask) -> tuple[FindingDraft, list]:
-        """Runs in a worker thread: only calls the LLM, never the UI or shared state."""
+        """Runs in a worker thread: calls the LLM and reports its searches, nothing else."""
         deps = [self.findings[d] for d in task.depends_on if d in self.findings]
         prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
         return self.worker.research(purpose=f"research:{task.id}", system=prompts.RESEARCHER,
-                                 prompt=prompt, schema=FindingDraft,
-                                 max_searches=self.budget.max_searches,
-                                 recency_days=plan.recency_days)
+                                    prompt=prompt, schema=FindingDraft,
+                                    max_searches=self.budget.max_searches,
+                                    recency_days=plan.recency_days,
+                                    on_step=self._step_reporter(task.id))
+
+    def _step_reporter(self, task_id: str):
+        """Turn a sub-agent's searches into events as they happen (from its worker thread:
+        the store is locked and every UI queues or prints, so this is safe)."""
+        def report(step) -> None:
+            type_, message, data = step_event(task_id, step)
+            self._emit(type_, message, **data)
+        return report
 
     def _accept_finding(self, plan: Plan, task: SubTask, result: tuple[FindingDraft, list]) -> None:
         draft, hits = result

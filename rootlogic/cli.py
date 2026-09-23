@@ -36,6 +36,7 @@ STYLE = {
     "session": "bold cyan", "memory": "magenta", "clarify": "yellow", "plan": "cyan",
     "task": "white", "source": "dim", "reflect": "blue", "analyze": "blue", "report": "green",
     "user": "yellow", "override": "bold yellow", "control": "bold yellow", "loop": "dim",
+    "subagent": "dim",
 }
 
 

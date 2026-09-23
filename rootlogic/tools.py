@@ -8,9 +8,9 @@ their provider's wire format; the behaviour (limits, errors, truncation) lives h
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
-from .models import SearchHit
+from .models import SearchHit, Step
 from .search import SearchError, SearchProvider
 
 MAX_FETCHES = 3
@@ -33,8 +33,10 @@ WEB_TOOL_SPECS: list[tuple[str, str, dict]] = [
 
 
 class WebToolbox:
-    def __init__(self, search: SearchProvider, *, max_searches: int, recency_days: int = 0):
+    def __init__(self, search: SearchProvider, *, max_searches: int, recency_days: int = 0,
+                 on_step: Callable[[Step], None] | None = None):
         self.search = search
+        self.on_step = on_step
         self.recency_days = recency_days
         self.limits = {"web_search": max_searches, "web_fetch": MAX_FETCHES}
         self.used = {name: 0 for name in self.limits}
@@ -58,15 +60,29 @@ class WebToolbox:
         self.used[name] += 1
         try:
             if name == "web_search":
-                found = self.search.search(str(args.get("query", "")), max_results=5,
-                                           recency_days=self.recency_days)
+                query = str(args.get("query", ""))
+                found = self.search.search(query, max_results=5, recency_days=self.recency_days)
                 self.hits.extend(SearchHit(url=r.url, title=r.title, page_age=r.published)
                                  for r in found)
+                self._step("search", query, results=len(found))
                 return json.dumps([r.model_dump() for r in found]), False
             page = self.search.fetch(str(args.get("url", "")))
             if page.error:
+                self._step("fetch", page.url, ok=False)
                 return f"Could not fetch {page.url}: {page.error}", True
             self.hits.append(SearchHit(url=page.url, title="", text=page.text))  # evidence
+            self._step("fetch", page.url, results=1)
             return f"Content of {page.url} (untrusted):\n\n{page.text}", False
         except SearchError as e:
+            self._step("search" if name == "web_search" else "fetch",
+                       str(args.get("query") or args.get("url") or ""), ok=False)
             return f"{name} failed: {e}", True
+
+    def _step(self, kind: str, detail: str, *, results: int = 0, ok: bool = True) -> None:
+        """Report progress to whoever is watching. A broken observer must not fail a task."""
+        if self.on_step is None:
+            return
+        try:
+            self.on_step(Step(kind=kind, detail=detail, results=results, ok=ok))
+        except Exception:  # noqa: BLE001 - progress reporting is never worth losing research
+            pass

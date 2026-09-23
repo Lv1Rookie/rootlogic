@@ -17,6 +17,8 @@ $ rootlogic research "impact of generative AI on local newsrooms"
 04:32:58 plan.created       Plan: 5 sub-tasks, sources ≤ 365 days old
   ┌ plan table — [a]pprove / [e]dit / [q]uit ┐
 04:33:01 task.started       [t1] Researching: How are local newsrooms adopting generative AI?
+04:33:09 subagent.search    [t1] Searched “local newsroom generative AI adoption 2026” — 5 result(s)
+04:33:22 subagent.fetch     [t1] Read https://www.rjionline.org/…
    ...                      (Ctrl-C → pause → skip t3 / add "Who funds this?" / note "focus on EU" / stop)
 04:34:40 source.dropped     [t2] Dropped https://… — outdated (2019-01-01 < 2025-09-22)
 04:35:12 reflect.done       Gaps found. No data on job losses → added [t6]
@@ -81,7 +83,7 @@ Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
 | Ask clarifying questions, adapt strategy in real time | `_clarify` (before planning) and `_reflect` (mid-run: new sub-tasks or questions to user) |
 | Summaries + key takeaways per source (bonus) | `SourceDraft.summary/key_takeaways`, report source list |
 | Long-term memory + related topic suggestions (bonus) | `Store.remember/recall` (SQLite FTS5), `Store.suggestions`, prior sessions fed to planner; a learned **user profile** (`continuity.learn_profile`) and **follow-up threads** that reuse earlier findings (`--follow-up`) |
-| Transparent action log, monitor/override (bonus) | `events` table + live stream; plan approve/edit; Ctrl-C override (skip/add/note/stop/abort) |
+| Transparent action log, monitor/override (bonus) | `events` table + live stream, down to each sub-agent search and fetch; plan approve/edit; Ctrl-C override (skip/add/note/stop/abort) |
 | Filter outdated/irrelevant, reliable research | plus claim verification against cited pages, corroboration labels, user source rules, report checks, and an evaluation set (`verify.py`, `evaluate.py`) |
 | Clear, testable orchestration | plain-Python state machine behind an `LLM` protocol; `FakeLLM` + `ScriptedUI` tests |
 

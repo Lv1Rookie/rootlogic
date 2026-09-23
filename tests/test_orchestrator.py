@@ -256,3 +256,32 @@ def test_llm_error_marks_session_failed(tmp_path):
     with pytest.raises(LLMError):
         orch.run("impact of generative AI on newsrooms")
     assert store.session(orch.sid)["status"] == "failed"
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_sub_agent_searches_show_up_in_the_action_log(tmp_path, kind):
+    """A sub-agent used to be a silent black box between task.started and task.done: a live
+    run showed nothing for minutes. Each search and fetch is now an event, tagged with the
+    task it belongs to and persisted, so the log explains what the agent did."""
+    from rootlogic.graph import ResearchGraph
+
+    store, ui = Store(), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(FakeLLM(), store, ui, **kw))
+    engine.run("impact of generative AI on newsrooms")
+
+    searches = [e for e in ui.events if e.type == "subagent.search"]
+    fetches = [e for e in ui.events if e.type == "subagent.fetch"]
+    assert len(searches) == 3 and len(fetches) == 3        # one per sub-task
+    assert {e.data["task"] for e in searches} == {"t1", "t2", "t3"}
+    assert all(e.data["results"] for e in searches)
+    assert all(e.data["url"].startswith("https://") for e in fetches)
+
+    # every sub-agent event is between its task's start and its end, and is stored
+    log = [(e["type"], (e["message"])) for e in store.events(engine.sid)]
+    types = [t for t, _ in log]
+    for task in ("t1", "t2", "t3"):
+        window = [i for i, (t, m) in enumerate(log) if m.startswith(f"[{task}]")]
+        assert types[window[0]] == "task.started" and types[window[-1]] == "task.done"
+    assert types.count("subagent.search") == 3

@@ -213,6 +213,18 @@ class SearchHit(BaseModel):
     text: str | None = None   # page text when the sub-agent fetched it: evidence for verification
 
 
+class Step(BaseModel):
+    """One action a research sub-agent took: a search or a page fetch.
+
+    Reported live (``LLM.research(on_step=...)``) so the action log shows what a sub-agent
+    is doing while it works, instead of a silent gap until it submits its findings.
+    """
+    kind: Literal["search", "fetch"]
+    detail: str               # the query text, or the URL
+    results: int = 0          # results returned (search) / 1 for a page that came back
+    ok: bool = True
+
+
 Verdict = Literal["supported", "partially_supported", "unsupported", "unverifiable", "unchecked"]
 Corroboration = Literal["corroborated", "single_source", "weak", "none"]
 

@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from .llm import Usage, UsageSink
 from .models import (Analysis, ClaimDraft, ClaimVerdictDraft, Clarification, Contradiction,
                      Credibility, FindingDraft, HoaxJudgement, PlanDraft, Preference,
-                     ProfileUpdate, Reflection, ReportDraft, SearchHit, SourceDraft, SubTaskDraft,
-                     VerificationDraft)
+                     ProfileUpdate, Reflection, ReportDraft, SearchHit, SourceDraft, Step,
+                     SubTaskDraft, VerificationDraft)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -163,7 +163,8 @@ class FakeLLM:
         return self.handlers[schema](prompt)  # type: ignore[return-value]
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
-                 max_searches: int = 8, recency_days: int = 0) -> tuple[T, list[SearchHit]]:
+                 max_searches: int = 8, recency_days: int = 0,
+                 on_step=None) -> tuple[T, list[SearchHit]]:
         self._record(purpose, prompt, searches=2)
         with self._lock:
             self._n += 1
@@ -171,6 +172,10 @@ class FakeLLM:
         handler = self.handlers.get(schema)
         finding = handler(prompt) if handler else default_finding(prompt, n)
         hits = [SearchHit(url=s.url, title=s.title, page_age=s.published) for s in finding.sources]
+        if on_step:  # the offline demo shows the same live progress a real sub-agent reports
+            on_step(Step(kind="search", detail=f"{purpose} query", results=len(hits)))
+            for hit in hits[:1]:
+                on_step(Step(kind="fetch", detail=hit.url, results=1))
         if finding.sources:  # the sub-agent "fetched" its primary source: evidence to verify
             hits.append(SearchHit(url=finding.sources[0].url, title=finding.sources[0].title,
                                   text=PRIMARY_PAGE))
