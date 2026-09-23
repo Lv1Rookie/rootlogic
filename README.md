@@ -197,8 +197,8 @@ two-method `LLM` interface.
 pip install -e '.[openai]'
 export TAVILY_API_KEY=tvly-...        # other models use our own search tools
 rootlogic research --provider openai --model gpt-5-mini --search tavily --prices 0.25,2 "topic"
-rootlogic research --provider openai --base-url http://localhost:11434/v1 --model llama3.3 \
-                   --search tavily "topic"        # local via Ollama: no LLM bill
+rootlogic research --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b \
+                   --search tavily --reasoning-effort none "topic"   # local Ollama: no LLM bill
 ```
 
 - `--search tavily` is required: Claude's built-in web tools only work with Claude.
@@ -206,6 +206,9 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
   in the prompt, validates it, and lets the model correct itself once.
 - `--prices IN,OUT` (USD per million tokens) enables cost tracking. Without it, non-Claude calls
   record $0.
+- `--reasoning-effort none|low|medium|high` for thinking models on servers that support it.
+  Locally this dominates the wall clock: `qwen3:8b` spent 72s on a clarification that takes
+  1.3s with `none`.
 - Claude-only features don't apply: `--zdr`, effort levels, and server-side refusal fallback.
   Refusals and content filtering from the other provider are still detected and reported.
 - **Moderation is required, because an arbitrary model may have no safety system.** With

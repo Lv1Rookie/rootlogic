@@ -309,3 +309,27 @@ def test_cli_wires_the_worker_model_through(tmp_path, monkeypatch):
     assert main(["--db", str(tmp_path / "x.db"), "research", "--offline", "-y",
                  "--worker-model", "claude-haiku-4-5",
                  "impact of generative AI on newsrooms"]) == 0
+
+
+def test_reasoning_effort_is_sent_on_every_request_when_set():
+    """Thinking models reason before every call: qwen3:8b took 72s on a clarification that
+    takes 1.3s with reasoning_effort 'none'. Opt-in, since servers that don't know the
+    parameter reject the request."""
+    completions = FakeCompletions([completion(json.dumps(CLARIFY))])
+    client = type("C", (), {"chat": type("Ch", (), {"completions": completions})()})()
+    llm = OpenAICompatibleLLM(lambda u: None, model="qwen3:8b", search=StaticSearch(),
+                              base_url="http://localhost:11434/v1", reasoning_effort="none",
+                              client=client)
+    llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert completions.calls[0]["reasoning_effort"] == "none"
+
+
+def test_reasoning_effort_is_omitted_by_default():
+    llm, api, _ = make([completion(json.dumps(CLARIFY))])
+    llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert "reasoning_effort" not in api.calls[0]
+
+
+def test_reasoning_effort_is_rejected_for_claude():
+    with pytest.raises(BackendError, match="reasoning-effort"):
+        Backend(reasoning_effort="none").validate()

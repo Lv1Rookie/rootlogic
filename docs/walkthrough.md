@@ -277,6 +277,7 @@ and `profile`. Useful flags on `research`:
 | `--no-profile` | Doesn't use or update the learned profile for this run (Step 16) |
 | `--provider openai --model … [--base-url …]` | Runs on another model (Step 17) |
 | `--worker-model MODEL` | Research sub-agents on a cheaper model than planning and writing |
+| `--reasoning-effort none` | Stop a thinking model reasoning before every call (Ollama, OpenAI) |
 | `--block` / `--only DOMAIN` | Source rules for one run (Step 18) |
 | `--verify-claims N` / `--no-verify` | How many claims to verify against their pages (Step 18) |
 | `--moderation {auto,none,openai,llama-guard}` | Content screening for non-Claude models (Step 19) |

@@ -29,6 +29,7 @@ class Backend:
     prices: tuple[float, float] | None = None  # $/MTok (input, output) for non-Claude models
     worker_model: str | None = None      # cheaper model for research sub-agents (same provider)
     worker_prices: tuple[float, float] | None = None
+    reasoning_effort: str | None = None  # openai provider: none|low|medium|high, if supported
     moderation: str = "auto"             # auto | none | openai | llama-guard
     moderation_model: str | None = None  # llama-guard: model id (default llama-guard3)
     moderation_base_url: str | None = None
@@ -47,6 +48,9 @@ class Backend:
                                    "web tools only work with Claude models")
             if self.zdr:
                 raise BackendError("--zdr applies to Claude's web tools only")
+        elif self.reasoning_effort:
+            raise BackendError("--reasoning-effort is for --provider openai; Claude's effort "
+                               "level is set per call")
         elif self.base_url:
             raise BackendError("--base-url is for --provider openai")
         self.resolved_moderation()   # last: the safety default, after the obvious mistakes
@@ -95,7 +99,8 @@ class Backend:
         if self.provider == "openai":
             from .openai_llm import OpenAICompatibleLLM
             return OpenAICompatibleLLM(usage_sink, model=model, search=search,
-                                       base_url=self.base_url, strict=self.strict, prices=prices)
+                                       base_url=self.base_url, strict=self.strict, prices=prices,
+                                       reasoning_effort=self.reasoning_effort)
         from .llm import AnthropicLLM
         return AnthropicLLM(usage_sink, model=model or MODEL, zdr=self.zdr, search=search)
 

@@ -38,9 +38,15 @@ T = TypeVar("T", bound=BaseModel)
 class OpenAICompatibleLLM:
     def __init__(self, usage_sink: UsageSink, *, model: str, search: SearchProvider,
                  base_url: str | None = None, api_key: str | None = None, strict: bool = True,
-                 prices: tuple[float, float] | None = None, client: openai.OpenAI | None = None):
+                 prices: tuple[float, float] | None = None, reasoning_effort: str | None = None,
+                 client: openai.OpenAI | None = None):
         """``prices`` = (input, output) USD per million tokens, for cost accounting; None
-        records $0 (right for local models; set it for paid APIs)."""
+        records $0 (right for local models; set it for paid APIs).
+
+        ``reasoning_effort`` is sent with every request when set. Thinking models reason
+        before every call, which on a local server is most of the wall clock: qwen3:8b spent
+        72s on a clarification that takes 1.3s with ``"none"``. Servers that don't know the
+        parameter reject it, so it is opt-in rather than a default."""
         if search is None:
             raise LLMError("OpenAI-compatible models need a SearchProvider (e.g. --search "
                            "tavily): Claude's web tools only work with Claude.")
@@ -52,10 +58,13 @@ class OpenAICompatibleLLM:
         self.search = search
         self.strict = strict
         self.prices = prices
+        self.reasoning_effort = reasoning_effort
         self.usage_sink = usage_sink
 
     # ------------------------------------------------------------------ plumbing
     def _create(self, purpose: str, **kwargs):
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         try:
             response = self.client.chat.completions.create(model=self.model, **kwargs)
         except openai.APIConnectionError as e:

@@ -453,6 +453,9 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
                         "(e.g. claude-haiku-4-5); planning, analysis and writing stay on --model")
     g.add_argument("--worker-prices", metavar="IN,OUT",
                    help="cost tracking for --worker-model (openai provider)")
+    g.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"],
+                   help="openai provider: how much a thinking model reasons per call, when the "
+                        "server supports it (Ollama, OpenAI). 'none' is much faster locally")
     g.add_argument("--search", choices=["anthropic", "tavily"], default="anthropic",
                    help="web search for sub-agents: Claude's built-in tools, or Tavily via our "
                         "own SearchProvider tools (needs TAVILY_API_KEY)")
@@ -490,7 +493,8 @@ def backend_from_args(args: argparse.Namespace) -> Backend:
                    model=getattr(args, "model", None), base_url=getattr(args, "base_url", None),
                    search=getattr(args, "search", "anthropic"), zdr=getattr(args, "zdr", False),
                    strict=not getattr(args, "no_strict", False),
-                   prices=parse_prices(getattr(args, "prices", None)))
+                   prices=parse_prices(getattr(args, "prices", None)),
+                   reasoning_effort=getattr(args, "reasoning_effort", None))
 
 
 def main(argv: list[str] | None = None) -> int:
