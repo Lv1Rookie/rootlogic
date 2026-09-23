@@ -91,6 +91,10 @@ class OpenAICompatibleLLM:
                 raise AuthError(f"The model provider rejected the request for billing reasons: "
                                 f"{e.message}") from e
             raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
+        except openai.APIError as e:
+            # The base class, and not a subclass of any of the above: a streamed request that
+            # fails mid-stream raises it, which escaped as a traceback from a live run.
+            raise LLMError(f"API error during {purpose}: {e}") from e
 
         # Not every OpenAI-compatible server returns a well-formed completion: routers and
         # local servers can answer 200 with an error object and no choices at all.

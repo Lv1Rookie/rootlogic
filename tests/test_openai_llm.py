@@ -7,6 +7,7 @@ client, so the adapter is exercised against the SDK's actual types without any n
 import json
 from types import SimpleNamespace
 
+import openai
 import pytest
 from openai.types.chat import ChatCompletion
 
@@ -468,3 +469,18 @@ def test_streaming_is_off_by_default():
 def test_stream_flag_is_rejected_for_claude():
     with pytest.raises(BackendError, match="--stream"):
         Backend(stream=True).validate()
+
+
+def test_a_bare_api_error_is_reported_like_any_other(monkeypatch):
+    """Live: a streamed request that failed mid-stream raised openai.APIError, which is the
+    base class and not a subclass of APIStatusError, so it escaped as a traceback."""
+    class Failing:
+        def create(self, **kw):
+            raise openai.APIError("[504]: Direct response did not start within 30000ms",
+                                  request=None, body=None)
+
+    client = type("C", (), {"chat": type("Ch", (), {"completions": Failing()})()})()
+    llm = OpenAICompatibleLLM(lambda u: None, model="m", search=StaticSearch(),
+                              base_url="http://localhost:20128/v1", client=client)
+    with pytest.raises(LLMError, match="API error during clarify"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
