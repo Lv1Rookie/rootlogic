@@ -26,6 +26,7 @@ from .store import Store
 from .backend import Backend, BackendError, parse_prices
 from .llm import AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
+from .moderation import offline_moderator
 
 console = Console()
 # Brackets are Rich style tags, so the letters must be escaped or they vanish from the prompt.
@@ -174,7 +175,9 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
         llm = (backend or Backend()).make_llm(usage_sink)
         worker_llm = (backend or Backend()).make_worker_llm(usage_sink)
 
-    moderator = None if offline else (backend or Backend()).make_moderator()
+    # Offline still screens: a deterministic gate, so the checkpoints really run.
+    moderator = (offline_moderator() if offline
+                 else (backend or Backend()).make_moderator())
     if engine == "graph":
         from .graph import ResearchGraph
         eng = ResearchGraph(llm, store, ui, worker_llm=worker_llm,

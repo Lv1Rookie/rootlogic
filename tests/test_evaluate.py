@@ -109,3 +109,23 @@ def test_cli_offline_eval_writes_results(tmp_path, capsys):
     run = EvalRun.model_validate_json(out.read_text())
     assert [r.id for r in run.results] == ["nibiru", "remote-work"]
     assert isinstance(run.results[0], CaseResult) and "Evaluation summary" in capsys.readouterr().out
+
+
+def test_a_report_with_no_dated_sources_fails_a_recency_case(tmp_path):
+    """Found in review: stale_share returns None when nothing is dated, and `or 0` turned that
+    into a pass. A report whose recency cannot be checked has not met a recency requirement."""
+    from rootlogic.fake_llm import default_finding
+    from rootlogic.models import FindingDraft
+
+    def undated(prompt):
+        draft = default_finding(prompt, 1)
+        for source in draft.sources:
+            source.published = "unknown"
+        return draft
+
+    case = EvalCase(id="r-undated", kind="recency", topic="a topic needing fresh sources",
+                    max_stale_share=0.5)
+    r = run_case(case, factory({FindingDraft: undated}, tmp_path), today=TODAY)
+
+    assert r.metrics["stale_share"] is None
+    assert not r.passed and any("date" in reason for reason in r.reasons)

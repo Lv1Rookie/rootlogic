@@ -197,8 +197,14 @@ def run_case(case: EvalCase, make_engine: Callable[[Store, AutoUI], Any],
     if m["contradictions"] < case.min_contradictions:
         result.reasons.append(f"found {m['contradictions']} contradiction(s), expected "
                               f">= {case.min_contradictions}")
-    if case.max_stale_share is not None and (m["stale_share"] or 0) > case.max_stale_share:
-        result.reasons.append(f"{m['stale_share']:.0%} of dated sources are over two years old")
+    if case.max_stale_share is not None:
+        # None means nothing carried a usable date. That is not "no stale sources": a report
+        # whose recency cannot be checked has not shown that it used recent sources.
+        if m["stale_share"] is None:
+            result.reasons.append("no source carried a usable date, so recency is unverifiable")
+        elif m["stale_share"] > case.max_stale_share:
+            result.reasons.append(
+                f"{m['stale_share']:.0%} of dated sources are over two years old")
 
     _add_usage(m, store, engine.sid)
     result.passed = not result.reasons

@@ -246,6 +246,20 @@ class StaticModerator:
                                 blocked_categories=blocked, warn_categories=warned)
 
 
+# Phrases the offline screen blocks on. Deliberately narrow and literal: the offline path
+# has no model to judge intent, so it catches the obvious harm-enabling requests (and the
+# harmful evaluation cases) without pretending to be a classifier.
+OFFLINE_BLOCK = ("nerve agent", "sarin", "untraceable firearm", "ghost gun", "pipe bomb",
+                 "improvised explosive", "bioweapon", "child sexual")
+
+
+def offline_moderator() -> "StaticModerator":
+    """The screen an --offline run uses. Without one, offline runs never reach a moderation
+    checkpoint, so the harmful evaluation cases score on the fake model's refusal alone and a
+    broken gate would look exactly like a working one."""
+    return StaticModerator(block=OFFLINE_BLOCK)
+
+
 def recovery_hint(stage: str, session_id: str) -> str:
     """What to do about a block. A flagged report is worth recovering: the research behind it
     is already stored, and small guard models do misfire (a 1B Llama Guard called a report on
