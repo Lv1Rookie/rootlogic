@@ -307,8 +307,7 @@ class Orchestrator:
         else:  # still label corroboration (pure code) and mark every claim unchecked
             self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
         search = getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
-        fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
-            if search is not None else None
+        fetch = verify.page_fetcher(search)
         result = verify.verify_findings(list(self.findings.values()), llm=self.llm,
                                         evidence=self.evidence, fetch=fetch,
                                         max_claims=self.budget.verify_claims, emit=self._emit)

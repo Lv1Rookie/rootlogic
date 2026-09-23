@@ -340,3 +340,54 @@ def test_subtask_that_retrieves_nothing_is_retried_then_failed(tmp_path, kind):
     assert "task.retry" in types and "task.failed" in types
     assert {t["task_id"]: t["status"] for t in store.tasks(engine.sid)}["t1"] == "failed"
     assert report is not None                       # the other sub-tasks still produced a report
+
+
+# ------------------------------------------------------------------ fetching cited pages
+
+
+def test_page_fetcher_returns_text_and_swallows_failures():
+    """Live crash: the fetcher was a lambda whose walrus ran after the condition that read it
+    (UnboundLocalError on the first cited page missing from evidence)."""
+    from rootlogic.search import SearchError, StaticSearch
+    from rootlogic.verify import page_fetcher
+
+    assert page_fetcher(None) is None
+
+    fetch = page_fetcher(StaticSearch(pages={"https://a.com": "page text"}))
+    assert fetch("https://a.com") == "page text"
+    assert fetch("https://missing.example") is None       # provider reported an error
+
+    class Broken(StaticSearch):
+        def fetch(self, url):
+            raise SearchError("provider down")
+
+    assert page_fetcher(Broken())("https://a.com") is None   # a dead provider is not fatal
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_verification_fetches_a_cited_page_the_sub_agents_did_not_keep(tmp_path, kind):
+    """End to end with a search provider attached, which is when the fetcher is built at all:
+    the Claude path has search=None, so every mocked test skipped this code."""
+    from rootlogic.fake_llm import FakeLLM
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.orchestrator import Orchestrator
+    from rootlogic.search import StaticSearch
+    from rootlogic.store import Store
+    from tests.test_orchestrator import TODAY, ScriptedUI
+
+    # A provider holding the pages the fake sub-agents cite but never fetched themselves.
+    pages = {f"https://example.org/report-{n}": PAGE for n in range(1, 5)}
+
+    class Searching(FakeLLM):
+        search = StaticSearch(pages=pages)
+
+    store, ui = Store(), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(Searching(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(Searching(), store, ui, **kw))
+
+    report = engine.run("impact of generative AI on newsrooms")
+
+    assert report is not None
+    assert store.session(engine.sid)["status"] == "done"
+    assert "verify.done" in ui.types()

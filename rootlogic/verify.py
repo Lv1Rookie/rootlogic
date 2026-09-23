@@ -25,6 +25,7 @@ from typing import Callable
 
 from . import prompts
 from .filters import host_of, normalize_url
+from .search import SearchError, SearchProvider
 from .llm import LLM, AgentRefusal, LLMError
 from .models import (CheckedClaim, Finding, ReportDraft, ReportQuality, SearchHit, SourceDraft,
                      VerificationDraft)
@@ -106,6 +107,26 @@ class VerifyResult:
     counts: dict[str, int] = field(default_factory=dict)
     fetched: int = 0
     calls: int = 0
+
+
+def page_fetcher(search: SearchProvider | None) -> Fetch | None:
+    """Fetch a cited page's text for verification, or None when there is no search provider.
+
+    Claude's hosted tools give us no provider to call (``search`` is None) and their pages
+    are already in ``evidence``; Tavily and local setups have one. A page that fails to come
+    back is unverifiable, never a reason to end the run.
+    """
+    if search is None:
+        return None
+
+    def fetch(url: str) -> str | None:
+        try:
+            page = search.fetch(url)
+        except SearchError:
+            return None
+        return page.text if not page.error else None
+
+    return fetch
 
 
 def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, str],

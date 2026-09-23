@@ -377,8 +377,7 @@ class ResearchGraph:
         else:  # still label corroboration (pure code) and mark every claim unchecked
             self._emit("verify.off", "Claim verification is off; claims are marked unchecked")
         search = getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
-        fetch = (lambda url: (p := search.fetch(url)).text if not p.error else None) \
-            if search is not None else None
+        fetch = verify.page_fetcher(search)
         evidence = dict(s.get("evidence", {}))
         result = verify.verify_findings(findings, llm=self.llm, evidence=evidence, fetch=fetch,
                                         max_claims=self.budget.verify_claims, emit=self._emit)
