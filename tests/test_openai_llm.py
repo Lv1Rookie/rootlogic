@@ -333,3 +333,31 @@ def test_reasoning_effort_is_omitted_by_default():
 def test_reasoning_effort_is_rejected_for_claude():
     with pytest.raises(BackendError, match="reasoning-effort"):
         Backend(reasoning_effort="none").validate()
+
+
+# ------------------------------------------------------------------ weak local models
+
+
+def test_findings_sent_as_text_are_accepted_instead_of_nudged_forever():
+    """Live with qwen3:8b: from ~6k tokens of web text on, it stopped calling tools and wrote
+    the answer out instead. If that answer is really the findings, take it."""
+    finding = dict(FINDING, answer="prose but valid")
+    llm, api, _ = make([completion(tool_calls=[("web_search", {"query": "q"})],
+                                   finish="tool_calls"),
+                        completion("Here are my findings:\n```json\n"
+                                   + json.dumps(finding) + "\n```")],
+                       search=StaticSearch(results=[SearchResult(
+                           url="https://a.com", title="A", snippet="s")]))
+    out, hits = llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
+    assert out.answer == "prose but valid"
+    assert [h.url for h in hits] == ["https://a.com"]       # the search it did still counts
+    assert len(api.calls) == 2                              # no nudge round trip
+
+
+def test_a_model_that_stops_calling_tools_fails_fast_with_advice():
+    """Ten turns of prose at ~2 minutes each is 20 minutes for nothing: stop after two and
+    say what to change."""
+    llm, api, _ = make([completion("I think the answer is...") for _ in range(4)])
+    with pytest.raises(LLMError, match="stopped calling tools"):
+        llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
+    assert len(api.calls) == 2                              # not box.max_turns

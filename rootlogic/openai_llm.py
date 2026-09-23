@@ -34,6 +34,8 @@ from .tools import NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
 
 T = TypeVar("T", bound=BaseModel)
 
+MUTE_LIMIT = 2   # prose turns in a row before a sub-agent is declared stuck (see research())
+
 
 class OpenAICompatibleLLM:
     def __init__(self, usage_sink: UsageSink, *, model: str, search: SearchProvider,
@@ -135,13 +137,26 @@ class OpenAICompatibleLLM:
         messages: list[dict] = [{"role": "system", "content": system},
                                 {"role": "user", "content": prompt}]
 
+        mute_turns = 0   # turns in a row that answered in prose instead of calling a tool
         for _ in range(box.max_turns):
             message = self._create(purpose, messages=messages, tools=tools)
             calls = message.tool_calls or []
             messages.append(_assistant_turn(message))
             if not calls:
+                # Small models drift out of tool calling as the conversation fills with web
+                # text: seen live with qwen3:8b, which wrote the answer as prose from ~6k
+                # tokens on. Take the answer if it is really the findings in disguise.
+                if (found := _findings_in_text(schema, message.content)) is not None:
+                    return found, box.hits
+                mute_turns += 1
+                if mute_turns >= MUTE_LIMIT:
+                    raise LLMError(
+                        f"{purpose}: the model stopped calling tools and answered in prose "
+                        f"{mute_turns} turns running. Try a model that is stronger at function "
+                        f"calling, or fewer --searches so the conversation stays short.")
                 messages.append({"role": "user", "content": NUDGE})
                 continue
+            mute_turns = 0
 
             finding: T | None = None
             for call in calls:  # every tool call must get a tool message back
@@ -176,6 +191,23 @@ def _why(response) -> str:
         return f"Provider said: {error}"
     return ("No error message was included. The model may be rate limited or unavailable: try "
             "another --model, or --no-strict if it rejects strict JSON schemas.")
+
+
+def _findings_in_text(schema: type[T], text: str | None) -> T | None:
+    """A model that answers in prose sometimes still emits the findings JSON, just not as a
+    tool call. Accept that rather than nudging a model that has stopped calling tools."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").removeprefix("json").strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        return schema.model_validate_json(cleaned[start:end + 1])
+    except ValidationError:
+        return None
 
 
 def _assistant_turn(message) -> dict:

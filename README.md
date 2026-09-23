@@ -204,6 +204,9 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
 - `--search tavily` is required: Claude's built-in web tools only work with Claude.
 - `--no-strict` is for servers without strict JSON-schema support. The adapter then asks for JSON
   in the prompt, validates it, and lets the model correct itself once.
+- Small local models drift out of tool calling once the conversation fills with web text. If a
+  sub-agent writes its findings as prose, the adapter takes them when they are valid JSON, and
+  otherwise gives up after two such turns rather than grinding through its whole turn budget.
 - `--prices IN,OUT` (USD per million tokens) enables cost tracking. Without it, non-Claude calls
   record $0.
 - `--reasoning-effort none|low|medium|high` for thinking models on servers that support it.
