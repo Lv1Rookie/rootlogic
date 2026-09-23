@@ -11,6 +11,7 @@ Two families live here:
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -205,6 +206,15 @@ class Plan(BaseModel):
                    recency_days=max(0, draft.recency_days), subtasks=tasks)
 
 
+def display_date(published: str) -> str:
+    """One date format in a report's sources. Providers mix ISO with RFC 1123
+    ("Thu, 19 Mar 2026 00:00:00 GMT"); anything unparseable is shown as it came."""
+    from .filters import parse_date   # local import: filters imports this module
+
+    parsed = parse_date(published, date.today())
+    return parsed.isoformat() if parsed else published
+
+
 class SearchHit(BaseModel):
     """A raw search result, or a fetched page (``text`` set), seen by a research sub-agent."""
     url: str
@@ -299,7 +309,7 @@ class Report(BaseModel):
         lines += self._quality_markdown()
         lines += ["## Sources", ""]
         for i, s in enumerate(self.sources, start=1):
-            lines.append(f"{i}. [{s.title}]({s.url}) — {s.publisher}, {s.published} "
+            lines.append(f"{i}. [{s.title}]({s.url}) — {s.publisher}, {display_date(s.published)} "
                          f"(credibility: {s.credibility.level})")
         return "\n".join(lines) + "\n"
 

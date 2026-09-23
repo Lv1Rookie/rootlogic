@@ -391,3 +391,12 @@ def test_verification_fetches_a_cited_page_the_sub_agents_did_not_keep(tmp_path,
     assert report is not None
     assert store.session(engine.sid)["status"] == "done"
     assert "verify.done" in ui.types()
+
+
+def test_report_sources_show_one_date_format():
+    """Providers mix ISO and RFC 1123 in the same run; the sources list shouldn't."""
+    from rootlogic.models import display_date
+
+    assert display_date("Thu, 19 Mar 2026 00:00:00 GMT") == "2026-03-19"
+    assert display_date("2026-03-17") == "2026-03-17"
+    assert display_date("sometime in spring") == "sometime in spring"   # shown as it came
