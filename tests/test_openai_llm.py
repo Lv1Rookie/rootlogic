@@ -5,6 +5,7 @@ client, so the adapter is exercised against the SDK's actual types without any n
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from openai.types.chat import ChatCompletion
@@ -384,3 +385,86 @@ def test_a_sub_agent_that_searched_submits_through_structured_output():
     assert "tools" not in wrap_up                           # no tools offered on the last call
     assert wrap_up["response_format"]["json_schema"]["strict"] is True
     assert "single JSON object" in wrap_up["messages"][-1]["content"]
+
+
+# ------------------------------------------------------------------ streaming
+
+
+def chunk(content=None, tool_calls=None, finish=None, usage=None, refusal=None):
+    """One streamed chunk, shaped like the SDK's ChatCompletionChunk."""
+    delta = SimpleNamespace(content=content, refusal=refusal, tool_calls=tool_calls)
+    choices = [SimpleNamespace(index=0, delta=delta, finish_reason=finish)]
+    return SimpleNamespace(model="qwen3:8b", choices=choices, usage=usage)
+
+
+def tc(index, *, id=None, name=None, arguments=None):
+    return SimpleNamespace(index=index, id=id,
+                           function=SimpleNamespace(name=name, arguments=arguments))
+
+
+def streaming(chunks, **kw):
+    llm, api, usages = make([chunks], **kw)
+    llm.stream = True
+    return llm, api, usages
+
+
+def test_streamed_text_is_reassembled_and_usage_recorded():
+    """A gateway times out waiting for a slow model's first byte (OmniRoute: 30s). Streaming
+    starts immediately, so the adapter must rebuild the reply from deltas."""
+    usage = SimpleNamespace(prompt_tokens=100, completion_tokens=20,
+                            prompt_tokens_details=SimpleNamespace(cached_tokens=40))
+    body = json.dumps(CLARIFY)
+    llm, api, usages = streaming([chunk(content=body[:10]), chunk(content=body[10:]),
+                                  chunk(finish="stop"), chunk(usage=usage)])
+
+    out = llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+    assert out.needs_clarification is False
+    assert api.calls[0]["stream"] is True
+    assert api.calls[0]["stream_options"] == {"include_usage": True}
+    assert usages[0].input_tokens == 60 and usages[0].cache_read_tokens == 40
+    assert usages[0].output_tokens == 20 and usages[0].stop_reason == "stop"
+    assert usages[0].model == "qwen3:8b"
+
+
+def test_streamed_tool_call_arguments_are_joined_across_chunks():
+    """Tool-call JSON arrives split at arbitrary points, keyed by index."""
+    args = json.dumps({"query": "newsroom AI"})
+    llm, _, _ = streaming([
+        chunk(tool_calls=[tc(0, id="call_0", name="web_search", arguments=args[:6])]),
+        chunk(tool_calls=[tc(0, arguments=args[6:])]),
+        chunk(finish="tool_calls"),
+    ], search=StaticSearch(results=[SearchResult(url="https://a.com", title="A", snippet="s")]))
+
+    message = llm._create("research:t1", messages=[])
+    call = message.tool_calls[0]
+    assert call.id == "call_0" and call.function.name == "web_search"
+    assert json.loads(call.function.arguments) == {"query": "newsroom AI"}
+
+
+def test_streamed_refusal_and_truncation_are_still_detected():
+    llm, _, _ = streaming([chunk(refusal="I can't help"), chunk(finish="stop")])
+    with pytest.raises(AgentRefusal):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+    llm, _, _ = streaming([chunk(content="{"), chunk(finish="length")])
+    with pytest.raises(LLMError, match="truncated"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+
+def test_a_server_that_sends_no_usage_chunk_still_works():
+    """Not every OpenAI-compatible server honours stream_options.include_usage."""
+    llm, _, usages = streaming([chunk(content=json.dumps(CLARIFY)), chunk(finish="stop")])
+    llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert usages[0].input_tokens == 0 and usages[0].stop_reason == "stop"
+
+
+def test_streaming_is_off_by_default():
+    llm, api, _ = make([completion(json.dumps(CLARIFY))])
+    llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert "stream" not in api.calls[0]
+
+
+def test_stream_flag_is_rejected_for_claude():
+    with pytest.raises(BackendError, match="--stream"):
+        Backend(stream=True).validate()

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass, field
 from typing import TypeVar
 
 import openai
@@ -41,7 +42,7 @@ class OpenAICompatibleLLM:
     def __init__(self, usage_sink: UsageSink, *, model: str, search: SearchProvider,
                  base_url: str | None = None, api_key: str | None = None, strict: bool = True,
                  prices: tuple[float, float] | None = None, reasoning_effort: str | None = None,
-                 client: openai.OpenAI | None = None):
+                 stream: bool = False, client: openai.OpenAI | None = None):
         """``prices`` = (input, output) USD per million tokens, for cost accounting; None
         records $0 (right for local models; set it for paid APIs).
 
@@ -61,14 +62,23 @@ class OpenAICompatibleLLM:
         self.strict = strict
         self.prices = prices
         self.reasoning_effort = reasoning_effort
+        self.stream = stream
         self.usage_sink = usage_sink
 
     # ------------------------------------------------------------------ plumbing
     def _create(self, purpose: str, **kwargs):
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.stream:
+            # Gateways time out waiting for the first byte of a slow model's answer
+            # (OmniRoute: 30s). A streamed reply starts within a second or two, so the
+            # whole class of "upstream timeout" failures disappears.
+            kwargs["stream"] = True
+            kwargs.setdefault("stream_options", {"include_usage": True})
         try:
             response = self.client.chat.completions.create(model=self.model, **kwargs)
+            if self.stream:
+                response = _collect(response)
         except openai.APIConnectionError as e:
             raise LLMError(f"network error during {purpose}: {e}") from e
         except openai.RateLimitError as e:
@@ -201,6 +211,84 @@ class OpenAICompatibleLLM:
 
 
 # =================================================================== helpers
+
+
+@dataclass
+class _Fn:
+    name: str = ""
+    arguments: str = ""
+
+
+@dataclass
+class _ToolCall:
+    id: str = ""
+    type: str = "function"
+    function: _Fn = field(default_factory=_Fn)
+
+
+@dataclass
+class _Message:
+    content: str | None = None
+    refusal: str | None = None
+    tool_calls: list[_ToolCall] | None = None
+
+
+@dataclass
+class _Choice:
+    message: _Message
+    finish_reason: str | None = None
+
+
+@dataclass
+class _Response:
+    """What ``_create`` needs from a completion, rebuilt from streamed chunks."""
+    choices: list[_Choice]
+    usage: object | None = None
+    model: str = ""
+
+
+def _collect(chunks) -> _Response:
+    """Reassemble a streamed completion into the object the rest of the adapter expects.
+
+    Deltas arrive in pieces: text by fragment, tool calls by index with the arguments JSON
+    split across chunks. Usage comes in a final chunk (``stream_options.include_usage``),
+    which some servers omit entirely.
+    """
+    message = _Message()
+    calls: dict[int, _ToolCall] = {}
+    finish_reason = None
+    usage = None
+    model = ""
+
+    for chunk in chunks:
+        model = getattr(chunk, "model", "") or model
+        if getattr(chunk, "usage", None) is not None:
+            usage = chunk.usage
+        choice = (getattr(chunk, "choices", None) or [None])[0]
+        if choice is None:
+            continue
+        finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+        delta = getattr(choice, "delta", None)
+        if delta is None:
+            continue
+        if getattr(delta, "content", None):
+            message.content = (message.content or "") + delta.content
+        if getattr(delta, "refusal", None):
+            message.refusal = (message.refusal or "") + delta.refusal
+        for part in getattr(delta, "tool_calls", None) or []:
+            call = calls.setdefault(part.index, _ToolCall())
+            if getattr(part, "id", None):
+                call.id = part.id
+            fn = getattr(part, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    call.function.name = fn.name
+                if getattr(fn, "arguments", None):
+                    call.function.arguments += fn.arguments
+
+    message.tool_calls = [calls[i] for i in sorted(calls)] or None
+    return _Response(choices=[_Choice(message=message, finish_reason=finish_reason)],
+                     usage=usage, model=model)
 
 
 def _why(response) -> str:

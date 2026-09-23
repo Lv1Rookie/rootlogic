@@ -30,6 +30,8 @@ class Backend:
     worker_model: str | None = None      # cheaper model for research sub-agents (same provider)
     worker_prices: tuple[float, float] | None = None
     reasoning_effort: str | None = None  # openai provider: none|low|medium|high, if supported
+    stream: bool = False                 # openai provider: stream replies (gateways time out
+                                         # waiting for a slow model's first byte)
     moderation: str = "auto"             # auto | none | openai | llama-guard
     moderation_model: str | None = None  # llama-guard: model id (default llama-guard3)
     moderation_base_url: str | None = None
@@ -51,6 +53,8 @@ class Backend:
         elif self.reasoning_effort:
             raise BackendError("--reasoning-effort is for --provider openai; Claude's effort "
                                "level is set per call")
+        elif self.stream:
+            raise BackendError("--stream is for --provider openai")
         elif self.base_url:
             raise BackendError("--base-url is for --provider openai")
         self.resolved_moderation()   # last: the safety default, after the obvious mistakes
@@ -100,7 +104,8 @@ class Backend:
             from .openai_llm import OpenAICompatibleLLM
             return OpenAICompatibleLLM(usage_sink, model=model, search=search,
                                        base_url=self.base_url, strict=self.strict, prices=prices,
-                                       reasoning_effort=self.reasoning_effort)
+                                       reasoning_effort=self.reasoning_effort,
+                                       stream=self.stream)
         from .llm import AnthropicLLM
         return AnthropicLLM(usage_sink, model=model or MODEL, zdr=self.zdr, search=search)
 

@@ -212,6 +212,10 @@ rootlogic research --provider openai --base-url http://localhost:11434/v1 --mode
   with it, four sources and a usable answer.
 - `--prices IN,OUT` (USD per million tokens) enables cost tracking. Without it, non-Claude calls
   record $0.
+- `--stream` is needed behind a gateway. Routers time out waiting for a slow model's first byte
+  (OmniRoute allows 30s), and a local model can spend a minute on a long planning prompt before
+  it emits anything; a streamed reply starts at once. The adapter reassembles the completion from
+  deltas, so nothing else in the pipeline changes.
 - `--reasoning-effort none|low|medium|high` for thinking models on servers that support it.
   Locally this dominates the wall clock: `qwen3:8b` spent 72s on a clarification that takes
   1.3s with `none`.
