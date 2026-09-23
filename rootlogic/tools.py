@@ -17,6 +17,8 @@ MAX_FETCHES = 3
 SUBMIT_DESCRIPTION = ("Submit your final, source-backed findings for this sub-task. "
                       "Call exactly once, when research is complete.")
 NUDGE = "Stop searching now and call submit_findings with what you have."
+WRAP_UP = ("Stop searching. Using only the sources and page text above, reply with the findings "
+           "as a single JSON object. No prose, no code fences.")
 
 # Provider-neutral specs: (name, description, JSON-schema parameters).
 WEB_TOOL_SPECS: list[tuple[str, str, dict]] = [

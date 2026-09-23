@@ -354,10 +354,33 @@ def test_findings_sent_as_text_are_accepted_instead_of_nudged_forever():
     assert len(api.calls) == 2                              # no nudge round trip
 
 
-def test_a_model_that_stops_calling_tools_fails_fast_with_advice():
-    """Ten turns of prose at ~2 minutes each is 20 minutes for nothing: stop after two and
-    say what to change."""
+def test_a_model_that_never_searched_fails_fast_with_advice():
+    """Ten prose turns at two minutes each is twenty minutes for nothing. With no sources
+    there is nothing to wrap up, so stop after two and say what to change."""
     llm, api, _ = make([completion("I think the answer is...") for _ in range(4)])
-    with pytest.raises(LLMError, match="stopped calling tools"):
+    with pytest.raises(LLMError, match="never ran a usable search"):
         llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
     assert len(api.calls) == 2                              # not box.max_turns
+
+
+def test_a_sub_agent_that_searched_submits_through_structured_output():
+    """Live with qwen3:8b and llama3.1:8b: both searched correctly, then wrote prose instead of
+    calling submit_findings. Tool-call arguments are free text to them; a JSON-schema
+    response_format is grammar-constrained, so ask for the findings that way instead."""
+    finding = dict(FINDING, answer="wrapped up")
+    llm, api, _ = make([completion(tool_calls=[("web_search", {"query": "q"})],
+                                   finish="tool_calls"),
+                        completion("Let me explain what I found..."),
+                        completion("Still explaining, no tool call..."),
+                        completion(json.dumps(finding))],
+                       search=StaticSearch(results=[SearchResult(
+                           url="https://a.com", title="A", snippet="s")]))
+
+    out, hits = llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft)
+
+    assert out.answer == "wrapped up"
+    assert [h.url for h in hits] == ["https://a.com"]       # the real search still counts
+    wrap_up = api.calls[-1]
+    assert "tools" not in wrap_up                           # no tools offered on the last call
+    assert wrap_up["response_format"]["json_schema"]["strict"] is True
+    assert "single JSON object" in wrap_up["messages"][-1]["content"]

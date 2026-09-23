@@ -30,7 +30,7 @@ from .llm import (AgentRefusal, AuthError, LLMError, StepSink, Usage, UsageSink,
                   json_schema)
 from .models import SearchHit
 from .search import SearchProvider
-from .tools import NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WebToolbox
+from .tools import NUDGE, SUBMIT_DESCRIPTION, WEB_TOOL_SPECS, WRAP_UP, WebToolbox
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -150,10 +150,7 @@ class OpenAICompatibleLLM:
                     return found, box.hits
                 mute_turns += 1
                 if mute_turns >= MUTE_LIMIT:
-                    raise LLMError(
-                        f"{purpose}: the model stopped calling tools and answered in prose "
-                        f"{mute_turns} turns running. Try a model that is stronger at function "
-                        f"calling, or fewer --searches so the conversation stays short.")
+                    return self._wrap_up(purpose, messages, schema, box)
                 messages.append({"role": "user", "content": NUDGE})
                 continue
             mute_turns = 0
@@ -172,7 +169,35 @@ class OpenAICompatibleLLM:
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
             if finding is not None:
                 return finding, box.hits
-        raise LLMError(f"{purpose}: research did not converge")
+        return self._wrap_up(purpose, messages, schema, box)
+
+    def _wrap_up(self, purpose: str, messages: list[dict], schema: type[T],
+                 box: WebToolbox) -> tuple[T, list[SearchHit]]:
+        """Ask for the findings as constrained structured output, with no tools offered.
+
+        A sub-agent that has searched but won't call ``submit_findings`` has done the work and
+        is failing at the call format. Live, an 8B model through Ollama searched correctly and
+        then wrote prose every turn: tool-call arguments are free-form text to it, while a
+        JSON-schema ``response_format`` is grammar-constrained and it handles that reliably.
+        """
+        if not box.hits:
+            raise LLMError(f"{purpose}: the model never ran a usable search, so there is "
+                           "nothing to report")
+        convo = [*messages, {"role": "user", "content": WRAP_UP}]
+        if self.strict:
+            fmt = {"type": "json_schema", "json_schema": {
+                "name": schema.__name__, "schema": json_schema(schema), "strict": True}}
+            message = self._create(purpose, messages=convo, response_format=fmt)
+        else:
+            convo[-1]["content"] += _json_instruction(schema)
+            message = self._create(purpose, messages=convo)
+        found = _findings_in_text(schema, message.content)
+        if found is None:
+            raise LLMError(f"{purpose}: the model stopped calling tools and could not produce "
+                           "its findings as JSON either. Try a model that is stronger at "
+                           "function calling, or fewer --searches so the conversation stays "
+                           "short.")
+        return found, box.hits
 
 
 # =================================================================== helpers

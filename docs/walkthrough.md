@@ -413,6 +413,21 @@ tests replay real SDK response objects, so no network is needed.
 One thing this opened up had to be closed again in Step 19: Claude screens harmful requests
 itself, and an arbitrary model may not.
 
+### What a weak model taught the adapter
+
+A live run on a local `qwen3:8b` (Ollama) searched well and then never submitted anything: from
+roughly 6k tokens of real search results on, it stopped calling tools and wrote its answer as
+prose, the same turn over and over, about two minutes each. `llama3.1:8b` did the same.
+
+The cause is worth knowing if you ever run local models: a tool call's arguments are free-form
+text the model has to get right on its own, while a JSON-schema `response_format` is
+*grammar-constrained* by the server, so the tokens literally cannot stray from the schema. Small
+models are far better at the second. So sub-agents now search with tools but, if the model stops
+calling them, submit through constrained structured output instead, with no tools offered on
+that last call. One that never searched still fails fast, since it has nothing to report.
+
+Same model, same task: zero sources before, four sources and a usable answer after.
+
 ## Step 18: Guardrails and proof → [`verify.py`](../rootlogic/verify.py) + [`evaluate.py`](../rootlogic/evaluate.py)
 
 The honest starting point: nothing earlier *ensured* reports were accurate, and nothing
