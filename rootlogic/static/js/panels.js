@@ -8,8 +8,7 @@ const RULE_TEXT = { block: "blocked", allow: "only these", trust: "trusted", dis
 export async function loadRules() {
   const { rules } = await api("/api/sources");
   const box = $("#rules");
-  box.innerHTML = rules.length ? ""
-    : `<div class="meta">None. Trust, distrust or block sites, or allow only some.</div>`;
+  box.innerHTML = rules.length ? "" : `<div class="meta">No rules yet.</div>`;
   for (const r of rules) {
     const row = document.createElement("div");
     row.className = "pref";
