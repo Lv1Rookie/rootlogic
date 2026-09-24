@@ -16,8 +16,13 @@ function systemTheme() {
 
 function apply(theme) {
   document.documentElement.dataset.theme = theme;
-  const btn = $("#theme");
-  if (btn) btn.setAttribute("aria-label", theme === "dark" ? "Switch to light" : "Switch to dark");
+  // The switch shows a daytime scene unchecked and a night one checked, so "checked" is dark.
+  const box = $("#theme");
+  if (box) {
+    box.checked = theme === "dark";
+    box.closest(".uiv-theme")?.setAttribute("aria-label",
+      theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  }
 }
 
 export function initTheme() {
@@ -25,10 +30,10 @@ export function initTheme() {
   try { saved = localStorage.getItem(KEY); } catch { /* private window: use the system theme */ }
   apply(saved || systemTheme());
 
-  const btn = $("#theme");
-  if (!btn) return;
-  btn.onclick = () => {
-    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  const box = $("#theme");
+  if (!box) return;
+  box.onchange = () => {
+    const next = box.checked ? "dark" : "light";
     apply(next);
     try { localStorage.setItem(KEY, next); } catch { /* not worth failing a click over */ }
   };

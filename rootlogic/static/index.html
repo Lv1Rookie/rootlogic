@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/uiverse.css">
 <link rel="stylesheet" href="/static/css/print.css" media="print">
 <script type="module" src="/static/js/main.js"></script>
 </head>
@@ -17,13 +18,34 @@
     <div class="brand">
       <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="var(--accent)"/><path d="M10 21l6-11 6 11" stroke="var(--accent-ink)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <div><b>rootlogic</b><br><span>agentic research assistant</span></div>
-      <button type="button" id="theme" class="theme-toggle" title="Switch between light and dark"
-              aria-label="Switch between light and dark">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/>
-        </svg>
-      </button>
+      <div class="uiv-theme-slot">
+        <label class="uiv-theme" aria-label="Switch between light and dark">
+          <input type="checkbox" id="theme">
+          <div class="switch-bg">
+            <div class="sky-stars">
+              <div class="star star-1"></div><div class="star star-2"></div>
+              <div class="star star-3"></div><div class="star star-4"></div>
+            </div>
+            <div class="sky-clouds">
+              <div class="cloud cloud-1"></div><div class="cloud cloud-2"></div>
+            </div>
+            <div class="sky-vault">
+              <div class="sun"></div>
+              <div class="moon">
+                <div class="craters">
+                  <div class="crater crater-1"></div><div class="crater crater-2"></div>
+                  <div class="crater crater-3"></div>
+                </div>
+              </div>
+            </div>
+            <div class="landscape">
+              <div class="mountain mountain-1"></div><div class="mountain mountain-2"></div>
+              <div class="terrain"></div>
+              <div class="tree tree-1"></div><div class="tree tree-2"></div><div class="tree tree-3"></div>
+            </div>
+          </div>
+        </label>
+      </div>
     </div>
 
     <details id="suggest-wrap" class="fold hidden" open>
@@ -158,16 +180,68 @@
         <div id="tab-log" class="timeline"></div>
         <div id="tab-report" class="report hidden">
           <div class="row report-actions hidden" id="report-actions">
-            <button type="button" class="btn small" id="save-pdf">Download PDF</button>
-            <button type="button" class="btn small" id="save-md">Download Markdown</button>
+            <span class="uiv-dl-group">
+              <button type="button" class="uiv-dl" id="save-pdf" title="Download as PDF"
+                      aria-label="Download as PDF"><svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 384 512" class="svgIcon"
+        aria-hidden="true"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"></path></svg><span class="icon2"></span></button>
+              <span class="uiv-dl-label">PDF</span>
+            </span>
+            <span class="uiv-dl-group">
+              <button type="button" class="uiv-dl" id="save-md" title="Download the Markdown source"
+                      aria-label="Download the Markdown source"><svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 384 512" class="svgIcon"
+        aria-hidden="true"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"></path></svg><span class="icon2"></span></button>
+              <span class="uiv-dl-label">MD</span>
+            </span>
           </div>
-          <div id="report-body"><div class="empty">The finished report appears here. Research in progress…</div></div>
+          <div id="report-body"><div class="uiv-loader-slot"><div class="uiv-loader">
+  <div class="forest">
+    <div class="tree tree1"><div class="branch branch-top"></div><div class="branch branch-middle"></div></div>
+    <div class="tree tree2"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+    <div class="tree tree3"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+    <div class="tree tree4"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+    <div class="tree tree5"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+    <div class="tree tree6"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+    <div class="tree tree7"><div class="branch branch-top"></div><div class="branch branch-middle"></div><div class="branch branch-bottom"></div></div>
+  </div>
+  <div class="tent">
+    <div class="roof"></div>
+    <div class="roof-border-left"><div class="roof-border roof-border1"></div><div class="roof-border roof-border2"></div><div class="roof-border roof-border3"></div></div>
+    <div class="entrance">
+      <div class="door left-door"><div class="left-door-inner"></div></div>
+      <div class="door right-door"><div class="right-door-inner"></div></div>
+    </div>
+  </div>
+  <div class="floor"><div class="ground ground1"></div><div class="ground ground2"></div></div>
+  <div class="fireplace">
+    <div class="support"></div><div class="support"></div><div class="bar"></div>
+    <div class="hanger"></div><div class="smoke"></div><div class="pan"></div>
+    <div class="fire">
+      <div class="line line1"><div class="particle particle1"></div><div class="particle particle2"></div><div class="particle particle3"></div><div class="particle particle4"></div></div>
+      <div class="line line2"><div class="particle particle1"></div><div class="particle particle2"></div><div class="particle particle3"></div><div class="particle particle4"></div></div>
+      <div class="line line3"><div class="particle particle1"></div><div class="particle particle2"></div><div class="particle particle3"></div><div class="particle particle4"></div></div>
+    </div>
+  </div>
+  <div class="time-wrapper"><div class="time">
+    <div class="day"></div>
+    <div class="night">
+      <div class="moon"></div>
+      <div class="star star1 star-big"></div><div class="star star2 star-big"></div>
+      <div class="star star3 star-big"></div><div class="star star4"></div>
+      <div class="star star5"></div><div class="star star6"></div><div class="star star7"></div>
+    </div>
+  </div></div>
+</div></div>
+<div class="uiv-loader-caption">The finished report appears here. Research in progress…</div></div>
         </div>
         <div id="tab-usage" class="hidden"><div class="empty">Usage appears when the session ends.</div></div>
       </div>
     </section>
   </main>
 </div>
+
+<button class="uiv-top" id="to-top" type="button" aria-label="Back to top">
+  <svg class="svgIcon" viewBox="0 0 384 512" aria-hidden="true"><path d="M214.6 41.4c-12.5-12.5-32.8-12.5-45.3 0l-160 160c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L160 141.2V448c0 17.7 14.3 32 32 32s32-14.3 32-32V141.2L329.4 246.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-160-160z"></path></svg>
+</button>
 
 </body>
 </html>

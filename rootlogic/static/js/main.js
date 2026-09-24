@@ -10,6 +10,8 @@ import { startRun, follow } from "./run.js";
 import { steer } from "./steer.js";
 import { savePdf, saveMarkdown } from "./export.js";
 import { initTheme } from "./theme.js";
+import { initScrollTop } from "./scrolltop.js";
+import { initCheckboxes } from "./checkbox.js";
 
 // --------------------------------------------------------------- tabs
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -158,6 +160,8 @@ for (const [id, prop] of [["engine", "value"], ["offline", "checked"],
 // Re-attach to a live run after a page refresh.
 (async () => {
   initTheme();
+  initScrollTop();
+  initCheckboxes();
   await Promise.all([loadHistory(), loadProfile(), loadRules(), loadPrompts()]);
   const live = (await api("/api/runs")).filter(r => r.status === "running").pop();
   if (live) {

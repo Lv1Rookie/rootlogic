@@ -19,6 +19,10 @@ export function resetState() {
                          paused: false });
 }
 
+// The waiting state is authored in index.html, so it is captured once rather than duplicated
+// here in a template string that would drift from it.
+const waitingMarkup = $("#report-body")?.innerHTML ?? "";
+
 export function setStatus(s) {
   const p = $("#v-status");
   p.className = "pill " + s;
@@ -57,8 +61,7 @@ export function resetView(topic) {
   resetAgents();
   resetSteer();
   $("#tab-log").innerHTML = "";
-  $("#report-body").innerHTML =
-    `<div class="empty">The finished report appears here. Research in progress…</div>`;
+  $("#report-body").innerHTML = waitingMarkup;
   clearReport();
   $("#tab-usage").innerHTML = `<div class="empty">Usage appears when the session ends.</div>`;
   $("#plan-rows").innerHTML = "";
