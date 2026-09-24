@@ -241,6 +241,9 @@ h2 + .meta { margin-top: -4px; }
 .composer-opts input[type=number] { width: 62px; }
 .composer-opts label.inline { font-size: 13px; white-space: nowrap; }
 .composer-bar .btn.primary { padding: 8px 20px; }
+.composer-go { gap: 10px; flex-wrap: nowrap; }
+.composer-keys { white-space: nowrap; font-size: 12px; color: var(--faint); }
+@media (max-width: 720px) { .composer-keys { display: none; } }   /* no keyboard to speak of */
 
 /* ================================================================= controls */
 textarea, input[type=text], input[type=number], select {

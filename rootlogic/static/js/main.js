@@ -29,8 +29,13 @@ $("#continue").onsubmit = async e => {
   try { await startRun(q, state.sid); $("#continue-text").value = ""; } catch (err) { alert(err.message); }
 };
 
+// Enter starts the research; Shift+Enter (and Cmd/Ctrl+Enter, which some editors send) is a
+// newline. An IME composing a character owns the Enter key while it commits that character,
+// so submitting on it would swallow the word being typed.
 $("#topic").onkeydown = e => {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#start").requestSubmit();
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  $("#start").requestSubmit();
 };
 
 // --------------------------------------------------------------- steering a live run
