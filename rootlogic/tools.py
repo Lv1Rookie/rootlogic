@@ -45,6 +45,12 @@ class WebToolbox:
         self.hits: list[SearchHit] = []
 
     @property
+    def exhausted(self) -> bool:
+        """Every tool budget is spent, so no further tool call can return anything. Seen
+        live: a sub-agent spent 84 minutes calling dead tools and being told so."""
+        return all(self.used[name] >= limit for name, limit in self.limits.items())
+
+    @property
     def max_turns(self) -> int:
         """Enough model turns to spend every budgeted call, plus a little slack."""
         return sum(self.limits.values()) + 4

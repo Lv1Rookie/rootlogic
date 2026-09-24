@@ -484,3 +484,29 @@ def test_a_bare_api_error_is_reported_like_any_other(monkeypatch):
                               base_url="http://localhost:20128/v1", client=client)
     with pytest.raises(LLMError, match="API error during clarify"):
         llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+
+def test_the_loop_stops_offering_tools_once_their_budgets_are_spent():
+    """Live: a sub-agent made 12 calls and emitted nothing for 84 minutes. Its searches and
+    fetches were used up, so every turn was the model calling a dead tool and being told
+    'budget used up' - each costing minutes on a local model."""
+    search = StaticSearch(results=[SearchResult(url="https://a.com", title="A", snippet="s")],
+                          pages={f"https://a.com/{i}": "page text " * 80 for i in range(4)})
+    finding = dict(FINDING, answer="wrapped up after budgets spent")
+    llm, api, _ = make([
+        completion(tool_calls=[("web_search", {"query": "one"})], finish="tool_calls"),
+        completion(tool_calls=[("web_fetch", {"url": "https://a.com/0"})], finish="tool_calls"),
+        completion(tool_calls=[("web_fetch", {"url": "https://a.com/1"})], finish="tool_calls"),
+        completion(tool_calls=[("web_fetch", {"url": "https://a.com/2"})], finish="tool_calls"),
+        completion(json.dumps(finding)),      # the wrap-up call: no tools offered
+        completion(tool_calls=[("web_search", {"query": "again"})], finish="tool_calls"),
+    ], search=search)
+
+    out, hits = llm.research(purpose="research:t1", system="s", prompt="p",
+                             schema=FindingDraft, max_searches=1)
+
+    assert out.answer == "wrapped up after budgets spent"
+    assert len(api.calls) == 5                      # one search, three fetches, one wrap-up
+    assert "tools" not in api.calls[-1]             # the last call asked for findings only
+    assert api.calls[-1]["response_format"]["json_schema"]["strict"] is True
+    assert len(hits) == 4                           # the search hit plus three fetched pages

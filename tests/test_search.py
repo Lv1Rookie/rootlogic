@@ -262,3 +262,25 @@ def test_a_failed_fetch_reports_why_too():
     llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
                  on_step=steps.append)
     assert steps[0].kind == "fetch" and steps[0].error == "not found"
+
+
+def test_anthropic_client_loop_also_stops_when_budgets_are_spent():
+    """The same waste applies to Claude with a SearchProvider: once nothing can be retrieved,
+    more tool-armed turns only re-send a growing conversation."""
+    search = StaticSearch(results=[SearchResult(url="https://a.com/0", title="A", snippet="s")],
+                          pages={f"https://a.com/{i}": "page text " * 80 for i in range(4)})
+    llm, messages = make_llm([
+        [tool_use("web_search", {"query": "one"}, "u1")],
+        [tool_use("web_fetch", {"url": "https://a.com/0"}, "u2")],
+        [tool_use("web_fetch", {"url": "https://a.com/1"}, "u3")],
+        [tool_use("web_fetch", {"url": "https://a.com/2"}, "u4")],
+        [tool_use("submit_findings", FINDING, "u5")],
+        [tool_use("web_search", {"query": "again"}, "u6")],
+    ], search)
+
+    llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
+                 max_searches=1)
+
+    assert len(messages.calls) == 5
+    last = messages.calls[-1]
+    assert [t["name"] for t in last["tools"]] == ["submit_findings"]   # nothing left to search

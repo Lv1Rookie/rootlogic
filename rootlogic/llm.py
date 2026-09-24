@@ -263,7 +263,10 @@ class AnthropicLLM:
         messages: list[dict] = [{"role": "user", "content": prompt}]
 
         for _ in range(box.max_turns):
-            response = self._create(purpose, max_tokens=16000, system=system, tools=tools,
+            # Once every tool budget is spent, offering the tools again only invites the model
+            # to call a dead one: keep submit_findings and nothing else.
+            turn_tools = [submit_tool] if box.exhausted else tools
+            response = self._create(purpose, max_tokens=16000, system=system, tools=turn_tools,
                                     messages=messages, output_config={"effort": "medium"})
             if (found := self._submitted(response, schema)) is not None:
                 return found, box.hits

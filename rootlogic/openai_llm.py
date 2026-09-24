@@ -183,6 +183,10 @@ class OpenAICompatibleLLM:
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
             if finding is not None:
                 return finding, box.hits
+            if box.exhausted:
+                # Searches and fetches are spent: another tool-armed turn can only be the
+                # model calling a dead tool. Ask for the findings directly.
+                return self._wrap_up(purpose, messages, schema, box)
         return self._wrap_up(purpose, messages, schema, box)
 
     def _wrap_up(self, purpose: str, messages: list[dict], schema: type[T],
