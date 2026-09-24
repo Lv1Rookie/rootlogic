@@ -461,3 +461,13 @@ def test_each_fold_carries_a_drawn_marker():
     assert html.count('class="fold-mark"') == 2, "every .fold summary needs its marker"
     assert 'id="history-zone"' in html and 'class="zone"' in html, \
         "the timezone label wears the heading's type, not .meta"
+
+
+def test_static_files_are_revalidated_not_assumed_fresh(client):
+    """The UI's filenames carry no content hash - there is no build step - so a browser that
+    caches a module keeps running it after the file changes. Seen repeatedly in testing: an
+    edit that simply did not appear until a brand new tab was opened."""
+    for path in ("/static/js/main.js", "/static/css/app.css", "/"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers.get("cache-control") == "no-cache", (path, r.headers)

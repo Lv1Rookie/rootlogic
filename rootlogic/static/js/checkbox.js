@@ -12,8 +12,13 @@ const MARK = `<div class="checkbox-wrapper"><div class="checkbox-bg"></div>
     <path stroke-linejoin="round" stroke-linecap="round" stroke-width="3" stroke="currentColor"
           d="M4 12L10 18L20 6" class="check-path"></path></svg></div>`;
 
+// A component that draws its own control owns that input. The day/night switch is one: its
+// scene flips on `input:checked ~ .switch-bg`, so moving the input inside a wrapper breaks
+// the selector and the page would be left with a checkbox drawn on top of a switch.
+const NOT_OURS = ".uiv-theme";
+
 function upgrade(input) {
-  if (input.dataset.uiv) return;
+  if (input.dataset.uiv || input.closest(NOT_OURS)) return;
   input.dataset.uiv = "1";
   const shell = document.createElement("span");
   shell.className = "uiv-check";

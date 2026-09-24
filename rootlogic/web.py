@@ -199,6 +199,23 @@ class ResumeRun(BaseModel):
 # =================================================================== app
 
 
+class RevalidatingStatic(StaticFiles):
+    """Serve the UI's files with ``Cache-Control: no-cache``.
+
+    The filenames are not fingerprinted - there is no build step to fingerprint them - so a
+    browser that caches ``state.js`` keeps running the old one after the file changes. Without
+    an explicit header, browsers fall back to heuristic caching and may not revalidate at all,
+    which shows up as an edit that simply does not appear. "no-cache" does not mean "do not
+    store": the file is still cached, the browser just asks first, and the ETag that Starlette
+    already sends turns that into an empty 304.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(store: Store, home: Path, *, engine_factory=None,
                backend: Backend | None = None) -> FastAPI:
     """``engine_factory(store, ui, engine=, offline=, budget=, home=)`` is injectable for tests."""
@@ -249,11 +266,12 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
 
     # ------------------------------------------------------------- pages
     # The UI is plain ES modules: no build step, so the browser resolves the imports itself.
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app.mount("/static", RevalidatingStatic(directory=STATIC), name="static")
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        return FileResponse(STATIC / "index.html",
+                            headers={"Cache-Control": "no-cache"})
 
     # ------------------------------------------------------------- runs (live)
     @app.post("/api/runs")
