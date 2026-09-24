@@ -290,6 +290,7 @@ class ResearchGraph:
         plan = Plan.model_validate(s["plan"])
         update: dict[str, Any] = {}
 
+        self.control.hold_here(self._emit)   # plain Pause: held here until Resume
         if self.control.aborting:
             return self._aborted(plan)
 
@@ -321,6 +322,7 @@ class ResearchGraph:
         """A research sub-agent. Receives only its own slice of state (via Send)."""
         task = SubTask.model_validate(payload["task"])
         # A model call in flight cannot be interrupted, but the next one need not start.
+        self.control.hold_here(self._emit)
         if self.control.aborting:
             return {"raw": []}
         plan = Plan.model_validate(payload["plan"])

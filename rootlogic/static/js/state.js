@@ -10,11 +10,13 @@ import { resetAgents } from "./agents.js";
 import { resetSteer } from "./steer.js";
 import { clearReport } from "./export.js";
 
-export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "" };
+export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
+                       paused: false };
 
 export function resetState() {
   if (state.source) state.source.close();
-  Object.assign(state, { run: null, sid: null, source: null, tasks: {}, order: [], objective: "" });
+  Object.assign(state, { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
+                         paused: false });
 }
 
 export function setStatus(s) {
@@ -22,10 +24,20 @@ export function setStatus(s) {
   p.className = "pill " + s;
   p.textContent = s;
   const live = s === "running" && !!state.run;
-  $("#pause").classList.toggle("hidden", !live);
+  // Pause is a hold: it swaps for Resume and the run waits there, doing nothing, until
+  // Resume is pressed. Override is the other thing the old "Pause & override" did.
+  $("#pause").classList.toggle("hidden", !live || state.paused);
+  $("#unpause").classList.toggle("hidden", !live || !state.paused);
+  $("#override").classList.toggle("hidden", !live || state.paused);
   // Abort used to live only inside the override card, which appears after a pause is
   // honoured - so a run that would not pause could not be stopped at all.
   $("#abort").classList.toggle("hidden", !live);
+}
+
+/** Reflect a control.paused / control.resumed event in the buttons. */
+export function setPaused(paused) {
+  state.paused = paused;
+  setStatus($("#v-status").textContent);
 }
 
 export function showTab(name) {
@@ -52,6 +64,7 @@ export function resetView(topic) {
   $("#plan-rows").innerHTML = "";
   $("#plan-objective").textContent = "";
   $("#plan-panel").classList.add("hidden");
+  state.paused = false;
   ["#resume", "#forget", "#continue"].forEach(s => $(s).classList.add("hidden"));
   setStatus("running");
   showTab("log");

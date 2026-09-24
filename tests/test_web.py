@@ -118,7 +118,7 @@ def test_reject_plan_aborts(client):
 def test_pause_then_override_stop(client):
     rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
     s = wait(client, rid, pending("plan"))
-    client.post(f"/api/runs/{rid}/pause")  # lands at the first checkpoint after approval
+    client.post(f"/api/runs/{rid}/checkpoint")  # lands at the first checkpoint after approval
     client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
                                                  "answer": {"approved": True}})
     s = wait(client, rid, pending("override"))
@@ -407,3 +407,22 @@ def test_abort_stops_a_run_without_an_override_card(client):
     types = [e["type"] for e in sse_events(client, rid)]
     assert "control.aborted" in types and "report.started" not in types
     assert client.post(f"/api/runs/{rid}/abort").status_code == 409   # already finished
+
+
+def test_pause_holds_the_run_and_resume_releases_it(client):
+    """Pause is a hold, not a question: nothing further runs until Resume is pressed."""
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    assert client.post(f"/api/runs/{rid}/pause").status_code == 200
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    # The stream stays open while a run lives, so read the status instead: a held run must
+    # still be running a second later, not finished.
+    time.sleep(1.0)
+    assert client.get(f"/api/runs/{rid}").json()["status"] == "running"
+
+    client.post(f"/api/runs/{rid}/resume")
+    assert wait(client, rid, finished)["status"] == "done"
+    types = [e["type"] for e in sse_events(client, rid)]
+    assert types.index("control.paused") < types.index("control.resumed")
+    assert types.index("control.resumed") < types.index("report.started")

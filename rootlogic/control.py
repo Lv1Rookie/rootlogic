@@ -52,6 +52,10 @@ class Control:
     def __init__(self) -> None:
         self._pause = threading.Event()
         self._abort = threading.Event()
+        self._go = threading.Event()   # set means "not held"; a hold clears it
+        self._go.set()
+        self._lock = threading.Lock()
+        self._announced = False        # so a wave of threads logs one pause, not one each
 
     def request_pause(self) -> None:
         self._pause.set()
@@ -67,6 +71,52 @@ class Control:
     def pause_pending(self) -> bool:
         return self._pause.is_set()
 
+    # ---------------------------------------------------------------- hold / resume
+    # A hold is the plain Pause a user expects: the run stops at its next safe point and
+    # stays stopped until Resume, with nothing to fill in. It is separate from the pause
+    # flag above, which asks for an override card and continues once that is answered.
+    def request_hold(self) -> None:
+        self._go.clear()
+
+    def release(self) -> None:
+        self._go.set()
+
+    @property
+    def held(self) -> bool:
+        return not self._go.is_set()
+
+    def wait_while_held(self) -> bool:
+        """Block until Resume (or Abort). True if the caller actually waited.
+
+        Abort wakes the gate so a held run can still be stopped - the caller checks for an
+        abort straight after.
+        """
+        if not self.held:
+            return False
+        while not self._go.wait(timeout=0.05):
+            if self._abort.is_set():
+                return True
+        return True
+
+    def hold_here(self, emit) -> bool:
+        """Safe point: block while held, announcing the pause and the resume once.
+
+        Several sub-agent threads can arrive here at the same time, so the first one to
+        arrive logs the pause and the last one to leave logs the resume.
+        """
+        if not self.held:
+            return False
+        with self._lock:
+            first, self._announced = not self._announced, True
+        if first:
+            emit("control.paused", "Paused — press Resume to continue")
+        self.wait_while_held()
+        with self._lock:
+            last, self._announced = self._announced, False
+        if last and not self.aborting:
+            emit("control.resumed", "Resumed")
+        return True
+
     def request_abort(self) -> None:
         """End the run at the next safe point, without waiting for a pause to be answered."""
         self._abort.set()
@@ -78,6 +128,7 @@ class Control:
     def clear(self) -> None:
         self._pause.clear()
         self._abort.clear()
+        self._go.set()
 
 
 def step_event(task_id: str, step: Step) -> tuple[str, str, dict]:

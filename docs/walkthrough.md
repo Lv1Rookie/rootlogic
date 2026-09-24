@@ -170,8 +170,9 @@ calls an `Interaction` object for four things: `ask`, `review_plan`, `override` 
 
 - The terminal UI implements `Interaction`, and so do the tests.
 - The web UI (Step 14) is one more implementation, with no change to the core.
-- Ctrl-C only sets a "pause" flag. The orchestrator checks it between waves, so it never
-  stops halfway through a step.
+- Ctrl-C only sets a "pause" flag, and the web UI's Pause sets a "hold" flag. Both are read at
+  sub-task boundaries, so neither ever stops halfway through a step. A pause hands control to
+  `Interaction.override` and continues once answered; a hold simply waits for Resume.
 
 **Sub-agents report as they work.** A first live run showed the weakness of coarse events: after
 three `task.started` lines the screen sat still for minutes, with no way to tell research from a

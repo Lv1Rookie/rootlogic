@@ -222,6 +222,7 @@ class Orchestrator:
                 self._accept_finding(plan, t, result)
                 # A sub-task boundary is the finest safe point there is: a model call in
                 # flight cannot be interrupted, but the next one need not start.
+                self._hold_if_requested()
                 self._abort_if_requested()
         self._save_plan(plan)
         self._checkpoint(plan)   # a pause pressed mid-wave is answered when the wave ends
@@ -241,6 +242,7 @@ class Orchestrator:
 
     def _research_task(self, plan: Plan, task: SubTask) -> tuple[FindingDraft, list]:
         """Runs in a worker thread: calls the LLM and reports its searches, nothing else."""
+        self._hold_if_requested()   # a pause pressed before this task started is honoured now
         deps = [self.findings[d] for d in task.depends_on if d in self.findings]
         prompt = ctx.research_prompt(plan, task, self.today, self.context, deps)
         return self.worker.research(purpose=f"research:{task.id}", system=self.prompts.researcher,
@@ -409,12 +411,17 @@ class Orchestrator:
             else:
                 self._emit("user.skipped", f"User skipped: {q} (agent will use its judgment)")
 
+    def _hold_if_requested(self) -> None:
+        """Plain Pause: stop here and stay stopped until the user presses Resume."""
+        self.control.hold_here(self._emit)
+
     def _abort_if_requested(self) -> None:
         if self.control.aborting:
             self._emit("control.aborted", "Aborted by user")
             raise Aborted("stopped by user")
 
     def _checkpoint(self, plan: Plan) -> None:
+        self._hold_if_requested()
         self._abort_if_requested()
         if not self.control.consume_pause():
             return

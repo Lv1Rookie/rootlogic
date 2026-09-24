@@ -144,7 +144,7 @@ makes the agent both autonomous and testable, and keeps cost bounded.
 | `models.py` | Pydantic schemas. LLM-facing ones are strict (all required, no extras). |
 | `filters.py` | Deterministic source rules; every drop gets a reason in the log. |
 | `store.py` | SQLite: sessions, conversation, action log, tasks, sources, per-call token usage, FTS5 memory. |
-| `control.py` | `Event`, `Command`, `Interaction` protocol, thread-safe pause flag. |
+| `control.py` | `Event`, `Command`, `Interaction` protocol, thread-safe hold/pause/abort flags. |
 | `prompts.py` | Static role prompts (clarifier, planner, researcher, critic, analyst, writer). |
 | `cli.py` | Rich terminal UI implementing `Interaction`. |
 | `web.py` + `static/index.html` | FastAPI + SSE web UI implementing `Interaction`; runs engines in background threads. |
@@ -313,7 +313,9 @@ rootlogic uses what you tell it, not just what it searches:
 
 - **Start** a run (topic, engine, offline toggle), with suggested next topics from memory.
 - **Answer** clarifying questions, then **edit the plan** (drop/add sub-tasks, set max source age) before anything is spent.
-- **Pause & override** mid-run: skip pending tasks, add one, give guidance, stop and write now, or abort.
+- **Pause** mid-run: the run holds at its next sub-task boundary and stays there until **Resume**.
+- **Override** mid-run: skip pending tasks, add one, give guidance, or stop and write now.
+- **Abort** at any time, without waiting for a pause to be honoured first.
 - **Watch** the live action log and plan status, then read the rendered report and per-step token/cost table.
 - **History:** reopen any past session. Sessions left `interrupted` by a server restart can be **resumed** (graph engine).
 

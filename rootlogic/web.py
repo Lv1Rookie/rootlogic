@@ -315,12 +315,34 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
 
     @app.post("/api/runs/{run_id}/pause")
     def pause(run_id: str) -> dict:
+        """Plain Pause: hold the run at its next sub-task boundary until Resume is pressed.
+
+        Distinct from ``/checkpoint`` below, which asks for an override card and continues
+        as soon as that card is answered.
+        """
+        run = get_run(run_id)
+        if run.finished:
+            raise HTTPException(409, "Run already finished")
+        run.engine.control.request_hold()
+        run.push({"type": "control.requested", "message": "Pause requested — holding at the "
+                                                          "next sub-task boundary"})
+        return {"ok": True}
+
+    @app.post("/api/runs/{run_id}/resume")
+    def resume_run(run_id: str) -> dict:
+        run = get_run(run_id)
+        run.engine.control.release()
+        return {"ok": True}
+
+    @app.post("/api/runs/{run_id}/checkpoint")
+    def checkpoint(run_id: str) -> dict:
+        """Stop at the next checkpoint and offer an override card (Skip and Steer use this)."""
         run = get_run(run_id)
         if run.finished:
             raise HTTPException(409, "Run already finished")
         run.engine.control.request_pause()
-        run.push({"type": "control.requested", "message": "Pause requested — will stop at the "
-                                                          "next checkpoint"})
+        run.push({"type": "control.requested", "message": "Override requested — will stop at "
+                                                          "the next checkpoint"})
         return {"ok": True}
 
     @app.post("/api/runs/{run_id}/abort")

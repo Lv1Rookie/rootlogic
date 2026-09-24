@@ -2,7 +2,7 @@
 
 import { $ } from "./dom.js";
 import { api } from "./api.js";
-import { state, resetView, setStatus, showTab } from "./state.js";
+import { state, resetView, setStatus, setPaused, showTab } from "./state.js";
 import { loadHistory } from "./history.js";
 import { loadProfile, loadRules } from "./panels.js";
 import { loadPrompts } from "./prompts.js";
@@ -79,8 +79,19 @@ $("#pref-add").onsubmit = async e => {
 };
 
 // --------------------------------------------------------------- run controls
-$("#pause").onclick = () =>
-  api(`/api/runs/${state.run}/pause`, { method: "POST" }).catch(e => alert(e.message));
+$("#pause").onclick = () => {
+  setPaused(true);   // optimistic: the button flips now, the engine stops at its next boundary
+  api(`/api/runs/${state.run}/pause`, { method: "POST" })
+    .catch(e => { setPaused(false); alert(e.message); });
+};
+
+$("#unpause").onclick = () => {
+  setPaused(false);
+  api(`/api/runs/${state.run}/resume`, { method: "POST" }).catch(e => alert(e.message));
+};
+
+$("#override").onclick = () =>
+  api(`/api/runs/${state.run}/checkpoint`, { method: "POST" }).catch(e => alert(e.message));
 
 $("#abort").onclick = () => {
   if (!confirm("Stop this run? Work already finished is kept, but no further research runs.")) return;

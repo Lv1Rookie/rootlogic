@@ -95,7 +95,9 @@
           <div class="meta"><span id="v-status" class="pill"></span> <span id="v-meta"></span></div>
         </div>
         <div class="row">
-          <button class="btn" id="pause" title="Pause at the next checkpoint and override">Pause &amp; override</button>
+          <button class="btn" id="pause" title="Hold the run at the next sub-task boundary until you resume">Pause</button>
+          <button class="btn primary hidden" id="unpause" title="Continue the held run">Resume</button>
+          <button class="btn" id="override" title="Stop at the next checkpoint to skip, add or steer">Override…</button>
           <button class="btn danger" id="abort" title="Stop this run at the next sub-task boundary">Abort run</button>
           <button class="btn hidden" id="resume" title="Continue from the last checkpoint (LangGraph engine)">Resume</button>
           <button class="btn primary hidden" id="retry" title="Research only what is missing: finished sub-tasks are reused">Retry</button>

@@ -389,3 +389,43 @@ def test_pause_is_noticed_between_sub_tasks_not_only_between_waves(tmp_path):
     # the pause landed while the wave was still running, so not every task started
     started = [e for e in ui.events if e.type == "task.started"]
     assert len(started) == 3 and types.index("control.paused") < len(types) - 1
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_pause_holds_the_run_until_resume(tmp_path, kind):
+    """Pause must actually stop the work and keep it stopped, not stop to ask a question and
+    carry on. Reported from the UI: the run kept researching after Pause."""
+    import threading
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.models import FindingDraft
+
+    store, ui = Store(), ScriptedUI()
+    holder, started = {}, threading.Event()
+
+    def pause_on_first(prompt):
+        if not started.is_set():
+            holder["e"].control.request_hold()
+            started.set()
+        return default_finding(prompt, 1)
+
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    llm = FakeLLM(handlers={FindingDraft: pause_on_first})
+    engine = (ResearchGraph(llm, store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(llm, store, ui, **kw))
+    holder["e"] = engine
+
+    done = threading.Event()
+    result: dict = {}
+    t = threading.Thread(target=lambda: (result.update(r=engine.run("newsroom AI")), done.set()))
+    t.start()
+
+    assert started.wait(5), "the run never reached a sub-task"
+    assert not done.wait(0.5), "the run finished while it was supposed to be held"
+    assert "control.paused" in ui.types()
+    assert "report.started" not in ui.types()          # held means no further work
+
+    engine.control.release()                            # the user presses Resume
+    assert done.wait(10), "the run did not continue after Resume"
+    t.join()
+    assert result["r"] is not None
+    assert "control.resumed" in ui.types()

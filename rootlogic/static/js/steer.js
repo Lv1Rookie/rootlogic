@@ -32,7 +32,7 @@ export async function steer(...cmds) {
   queued.push(...cmds);
   note(describe(queued) + " — applying at the next checkpoint…");
   try {
-    await api(`/api/runs/${state.run}/pause`, { method: "POST" });
+    await api(`/api/runs/${state.run}/checkpoint`, { method: "POST" });
   } catch (e) {
     queued = [];
     note("");
