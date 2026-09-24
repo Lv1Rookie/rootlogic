@@ -225,7 +225,7 @@ def test_non_claude_models_require_a_decision_about_moderation(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY")
     assert Backend(**openai_backend, moderation="none").validate().make_moderator() is None
     guard = Backend(**openai_backend, moderation="llama-guard",
-                    base_url="http://localhost:11434/v1").make_moderator()
+                    base_url="http://localhost:20128/v1").make_moderator()
     assert isinstance(guard, LlamaGuardModerator) and guard.model == "llama-guard3"
     assert Backend().resolved_moderation() == "none"      # Claude screens itself
     with pytest.raises(BackendError, match="unknown moderation"):

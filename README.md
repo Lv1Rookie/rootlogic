@@ -197,7 +197,7 @@ two-method `LLM` interface.
 pip install -e '.[openai]'
 export TAVILY_API_KEY=tvly-...        # other models use our own search tools
 rootlogic research --provider openai --model gpt-5-mini --search tavily --prices 0.25,2 "topic"
-rootlogic research --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b \
+rootlogic research --provider openai --base-url http://localhost:20128/v1 --model qwen3:8b \
                    --search tavily --reasoning-effort none "topic"   # local Ollama: no LLM bill
 ```
 

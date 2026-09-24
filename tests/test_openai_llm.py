@@ -197,11 +197,11 @@ def test_backend_rejects_invalid_combinations(kw, message):
 
 def test_backend_builds_openai_adapter(monkeypatch):
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
-    llm = Backend(provider="openai", model="llama3.3", base_url="http://localhost:11434/v1",
+    llm = Backend(provider="openai", model="llama3.3", base_url="http://localhost:20128/v1",
                   search="tavily", prices=(0.0, 0.0),
                   moderation="none").make_llm(lambda u: None)
     assert isinstance(llm, OpenAICompatibleLLM)
-    assert str(llm.client.base_url).startswith("http://localhost:11434/v1")
+    assert str(llm.client.base_url).startswith("http://localhost:20128/v1")
     assert Backend().label == ("anthropic:claude-opus-5 · search: anthropic · moderation: none")
 
 
@@ -320,7 +320,7 @@ def test_reasoning_effort_is_sent_on_every_request_when_set():
     completions = FakeCompletions([completion(json.dumps(CLARIFY))])
     client = type("C", (), {"chat": type("Ch", (), {"completions": completions})()})()
     llm = OpenAICompatibleLLM(lambda u: None, model="qwen3:8b", search=StaticSearch(),
-                              base_url="http://localhost:11434/v1", reasoning_effort="none",
+                              base_url="http://localhost:20128/v1", reasoning_effort="none",
                               client=client)
     llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
     assert completions.calls[0]["reasoning_effort"] == "none"

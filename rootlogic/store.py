@@ -188,9 +188,25 @@ class Store:
     def sessions(self, limit: int = 20) -> list[dict[str, Any]]:
         return self._all("SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,))
 
+    STALE_AFTER_SECONDS = 300
+
     def mark_interrupted(self) -> int:
-        """Sessions left 'running' by a process that died. Returns how many were marked."""
-        cur = self._exec("UPDATE sessions SET status = 'interrupted' WHERE status = 'running'")
+        """Sessions left 'running' by a process that died. Returns how many were marked.
+
+        A session whose last event is recent belongs to a run that is still working, possibly
+        in another process: seen live, starting a second web server relabelled an in-flight
+        session as interrupted while its sub-agents were mid-search. Only sessions that have
+        gone quiet are treated as orphaned.
+        """
+        cur = self._exec(
+            # julianday parses both the stored ISO-8601 stamps (with T and an offset) and
+            # SQLite's own 'now', where a string comparison would not.
+            """UPDATE sessions SET status = 'interrupted'
+               WHERE status = 'running'
+                 AND julianday(COALESCE(
+                       (SELECT MAX(ts) FROM events WHERE session_id = sessions.id),
+                       created_at)) < julianday('now', ?)""",
+            (f"-{self.STALE_AFTER_SECONDS} seconds",))
         return cur.rowcount
 
     def delete_session(self, sid: str) -> None:

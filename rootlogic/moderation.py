@@ -184,7 +184,7 @@ class LlamaGuardModerator:
     # summaries: warn only. Everything else blocks.
     BLOCK = {"S1", "S2", "S3", "S4", "S7", "S9", "S10", "S11", "S12", "S13"}
 
-    def __init__(self, *, base_url: str = "http://localhost:11434/v1",
+    def __init__(self, *, base_url: str = "http://localhost:20128/v1",
                  model: str = "llama-guard3", strict: bool = False,
                  client: openai.OpenAI | None = None):
         self.client = client or openai.OpenAI(base_url=base_url, api_key="local")

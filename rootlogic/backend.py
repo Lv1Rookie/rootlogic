@@ -90,7 +90,7 @@ class Backend:
             return OpenAIModerator(strict=self.moderation_strict)
         from .moderation import LlamaGuardModerator
         return LlamaGuardModerator(
-            base_url=self.moderation_base_url or self.base_url or "http://localhost:11434/v1",
+            base_url=self.moderation_base_url or self.base_url or "http://localhost:20128/v1",
             model=self.moderation_model or "llama-guard3", strict=self.moderation_strict)
 
     def make_llm(self, usage_sink: UsageSink, *, worker: bool = False):

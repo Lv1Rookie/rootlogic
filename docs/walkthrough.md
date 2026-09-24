@@ -597,7 +597,7 @@ facts. The machinery is sound either way; the judgement is only as good as the m
    brew install ollama && ollama serve          # or: brew services start ollama
    ollama pull qwen3:8b
    export TAVILY_API_KEY=tvly-...               # free tier is plenty
-   rootlogic research --provider openai --base-url http://localhost:11434/v1 \
+   rootlogic research --provider openai --base-url http://localhost:20128/v1 \
        --model qwen3:8b --reasoning-effort none --search tavily --moderation none \
        --searches 2 --verify-claims 12 "a topic you know well"
    ```

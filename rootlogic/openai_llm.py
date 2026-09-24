@@ -5,7 +5,7 @@ wire format (``POST /v1/chat/completions``), which many providers accept. Point 
 a compatible server to switch providers:
 
     OpenAI      base_url=None (default)               api key from OPENAI_API_KEY
-    Ollama      base_url="http://localhost:11434/v1"   no key needed
+    Ollama      base_url="http://localhost:20128/v1"   no key needed
     OpenRouter  base_url="https://openrouter.ai/api/v1"
 
 Research needs a ``SearchProvider``: hosted search tools are vendor-specific, so sub-agents use

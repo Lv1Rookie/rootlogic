@@ -468,7 +468,7 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
                    help="anthropic (Claude) or openai: any OpenAI-compatible server "
                         "(OpenAI, Ollama, LM Studio, vLLM, OpenRouter)")
     g.add_argument("--model", help="model id; default claude-opus-5, required for openai")
-    g.add_argument("--base-url", help="OpenAI-compatible server, e.g. http://localhost:11434/v1")
+    g.add_argument("--base-url", help="OpenAI-compatible server, e.g. http://localhost:20128/v1")
     g.add_argument("--no-strict", action="store_true",
                    help="openai provider: for servers without strict JSON-schema support")
     g.add_argument("--prices", metavar="IN,OUT",

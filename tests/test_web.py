@@ -2,6 +2,7 @@
 
 import json
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -24,6 +25,13 @@ def client(tmp_path):
         return create_engine(store, ui, **kw)
 
     return TestClient(create_app(store, tmp_path, engine_factory=factory))
+
+
+def age(store, sid, seconds):
+    """Pretend a session (and its events) last showed life `seconds` ago."""
+    old = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat(timespec="seconds")
+    store._exec("UPDATE sessions SET created_at = ? WHERE id = ?", (old, sid))
+    store._exec("UPDATE events SET ts = ? WHERE session_id = ?", (old, sid))
 
 
 def wait(client, run_id, until, timeout=5.0):
@@ -162,6 +170,7 @@ def test_index_and_validation(client):
 def test_orphaned_sessions_marked_interrupted_on_startup(tmp_path):
     store = Store(tmp_path / "rl.db")
     sid = store.create_session("left running by a dead server")
+    age(store, sid, 3600)          # quiet for an hour: nothing is working on it
     create_app(store, tmp_path, engine_factory=lambda *a, **k: None)
     assert store.session(sid)["status"] == "interrupted"
 
@@ -329,3 +338,28 @@ def test_a_run_can_set_searches_and_parallelism(client):
 def test_search_and_parallel_limits_are_bounded(client):
     assert client.post("/api/runs", json={"topic": "x y", "max_searches": 99}).status_code == 422
     assert client.post("/api/runs", json={"topic": "x y", "max_parallel": 0}).status_code == 422
+
+
+def test_starting_a_second_server_does_not_relabel_a_live_session(tmp_path):
+    """Found live: running `rootlogic web` while a run was in flight marked its session
+    'interrupted'. create_app ran mark_interrupted before uvicorn bound the port, so even a
+    server that failed with 'address already in use' rewrote the data first."""
+    store = Store(tmp_path / "rl.db")
+    fresh = store.create_session("a run that is still going")
+    store.add_event(fresh, "subagent.search", "[t1] Searched “x” — 5 result(s)")
+    stale = store.create_session("a run orphaned by an old server")
+    age(store, stale, 3600)
+
+    create_app(store, tmp_path)          # a second server starting up
+
+    assert store.session(fresh)["status"] == "running", "a live session must not be touched"
+    assert store.session(stale)["status"] == "interrupted"
+
+
+def test_a_session_that_died_before_emitting_anything_is_still_marked(tmp_path):
+    """A run killed before its first event is an orphan too, once it has gone quiet."""
+    store = Store(tmp_path / "rl.db")
+    sid = store.create_session("died immediately")
+    age(store, sid, 3600)
+    create_app(store, tmp_path)
+    assert store.session(sid)["status"] == "interrupted"
