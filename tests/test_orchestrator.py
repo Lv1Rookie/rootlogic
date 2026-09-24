@@ -429,3 +429,28 @@ def test_pause_holds_the_run_until_resume(tmp_path, kind):
     t.join()
     assert result["r"] is not None
     assert "control.resumed" in ui.types()
+
+
+def test_abort_is_noticed_even_when_every_sub_task_fails(tmp_path):
+    """A live run took nine minutes to abort: the failure path skipped the abort check, so a
+    wave of failing sub-tasks spent all its retries first."""
+    from rootlogic.models import FindingDraft
+
+    store, ui = Store(), ScriptedUI()
+    holder, calls = {}, []
+
+    def fail_after_abort(prompt):
+        calls.append(prompt)
+        holder["e"].control.request_abort()
+        raise LLMError("search backend down")
+
+    engine = Orchestrator(FakeLLM(handlers={FindingDraft: fail_after_abort}), store, ui,
+                          reports_dir=tmp_path, today=TODAY)
+    holder["e"] = engine
+
+    assert engine.run("impact of generative AI on newsrooms") is None
+    assert store.session(engine.sid)["status"] == "aborted"
+    assert "control.aborted" in ui.types()
+    # the wave had three sub-tasks and two retries each; abort must stop it, not outlast it
+    assert len(calls) <= 3, f"kept working after abort: {len(calls)} research calls"
+    assert ui.types().count("control.aborted") == 1   # one line, not one per thread

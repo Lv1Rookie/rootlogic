@@ -282,7 +282,8 @@ class ResearchGraph:
     def _aborted(self, plan: Plan) -> dict:
         """End the run now, without waiting for a pause to be answered."""
         self.store.update_session(self.sid, status="aborted")
-        self._emit("control.aborted", "Aborted by user")
+        if self.control.claim_abort_notice():
+            self._emit("control.aborted", "Aborted by user")
         self._emit("session.aborted", "Aborted: stopped by user")
         return {"status": "aborted", "stop": True, "wave": [], "plan": plan.model_dump()}
 

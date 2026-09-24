@@ -56,6 +56,7 @@ class Control:
         self._go.set()
         self._lock = threading.Lock()
         self._announced = False        # so a wave of threads logs one pause, not one each
+        self._abort_announced = False
 
     def request_pause(self) -> None:
         self._pause.set()
@@ -121,6 +122,15 @@ class Control:
         """End the run at the next safe point, without waiting for a pause to be answered."""
         self._abort.set()
 
+    def claim_abort_notice(self) -> bool:
+        """True for the first caller only: sub-agent threads all notice the same abort, and
+        the action log should say so once."""
+        with self._lock:
+            if self._abort_announced:
+                return False
+            self._abort_announced = True
+            return True
+
     @property
     def aborting(self) -> bool:
         return self._abort.is_set()
@@ -128,6 +138,7 @@ class Control:
     def clear(self) -> None:
         self._pause.clear()
         self._abort.clear()
+        self._abort_announced = False
         self._go.set()
 
 
