@@ -327,6 +327,15 @@ label.inline:hover { color: var(--ink); }
 /* inside an override card a chip wraps a checkbox, so it must not clip its label */
 .chip:has(input) { display: inline-flex; align-items: flex-start; gap: 7px; white-space: normal; }
 
+/* A pill only reads as a pill on one line. A suggested topic runs to three, and a 999px
+ * radius then cuts the corners off its first and last lines, so the wrapping ones take a
+ * plain rounded box with room down the sides instead. */
+#suggestions .chip {
+  display: block; width: 100%; text-align: left;
+  border-radius: var(--r-md); padding: 9px 13px; line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
 .list { display: flex; flex-direction: column; gap: 2px; }
 .item {
   padding: 8px 9px; border-radius: var(--r-sm); cursor: pointer; display: grid; width: 100%;

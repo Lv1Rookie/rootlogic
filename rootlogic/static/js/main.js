@@ -60,8 +60,10 @@ $("#steer").onsubmit = e => {
 };
 
 // --------------------------------------------------------------- exporting the result
-$("#save-pdf").onclick = savePdf;
-$("#save-md").onclick = saveMarkdown;
+// One button, one format picker beside it: the choice is the dropdown's, the action the
+// button's, rather than two buttons that look alike and do different things.
+$("#download").onclick = () =>
+  ($("#dl-format").value === "md" ? saveMarkdown : savePdf)();
 
 // --------------------------------------------------------------- settings forms
 $("#rule-add").onsubmit = async e => {

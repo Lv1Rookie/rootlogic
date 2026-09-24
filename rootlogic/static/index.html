@@ -187,19 +187,15 @@
         <div id="tab-log" class="timeline"></div>
         <div id="tab-report" class="report hidden">
           <div class="row report-actions hidden" id="report-actions">
-            <span class="uiv-dl-lead">Download this report</span>
-            <span class="uiv-dl-group">
-              <button type="button" class="uiv-dl" id="save-pdf" title="Download as PDF"
-                      aria-label="Download as PDF"><svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 384 512" class="svgIcon"
-        aria-hidden="true"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"></path></svg><span class="icon2"></span></button>
-              <span class="uiv-dl-label">.pdf</span>
-            </span>
-            <span class="uiv-dl-group">
-              <button type="button" class="uiv-dl" id="save-md" title="Download the Markdown source"
-                      aria-label="Download the Markdown source"><svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 384 512" class="svgIcon"
-        aria-hidden="true"><path d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"></path></svg><span class="icon2"></span></button>
-              <span class="uiv-dl-label">.md</span>
-            </span>
+            <label class="dl-label" for="dl-format">Download this report as</label>
+            <select id="dl-format" class="dl-format">
+              <option value="pdf">.pdf</option>
+              <option value="md">.md</option>
+            </select>
+            <button type="button" class="uiv-dl" id="download" title="Download the report"
+                    aria-label="Download the report"><svg xmlns="http://www.w3.org/2000/svg"
+                height="1em" viewBox="0 0 384 512" class="svgIcon" aria-hidden="true"><path
+                d="M169.4 470.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 370.8 224 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 306.7L54.6 265.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z"></path></svg><span class="icon2"></span></button>
           </div>
           <div id="report-body"><div class="uiv-loader-slot"><div class="uiv-loader">
   <div class="forest">
