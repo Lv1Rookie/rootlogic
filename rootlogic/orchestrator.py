@@ -23,6 +23,7 @@ from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
                      Report, ReportDraft, SubTask, SubTaskDraft)
 from .store import Store
+from .tracing import NullTracer, Tracer
 
 
 class Aborted(Exception):
@@ -46,7 +47,8 @@ class Orchestrator:
                  reports_dir: Path | str = "reports", today: date | None = None,
                  blocked_domains: tuple[str, ...] = (), use_profile: bool = True,
                  source_policy: SourcePolicy | None = None, moderator: Moderator | None = None,
-                 prompt_set: prompts.PromptSet | None = None):
+                 prompt_set: prompts.PromptSet | None = None,
+                 tracer: Tracer | None = None):
         self.llm = llm                      # planning, reflection, analysis, writing, verifying
         self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
@@ -56,6 +58,7 @@ class Orchestrator:
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
         self.prompts = prompt_set or prompts.PromptSet()   # editable per run; disclosed
+        self.tracer = tracer or NullTracer()   # optional Langfuse tracing
         self.use_profile = use_profile          # read + learn the user's standing preferences
         self.source_policy = source_policy      # None: load the user's saved source rules
         self.moderation = ModerationGate(moderator, self._emit)  # request, user input, report
@@ -77,6 +80,7 @@ class Orchestrator:
         previous = continuity.load_previous(self.store, parent) if parent else None
         self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
+        self.tracer.session(self.sid, topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}”")
         self._announce_prompts()
         try:
@@ -479,6 +483,9 @@ class Orchestrator:
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
             self.store.add_event(self.sid, type_, message, data or None)
+        self.tracer.event(type_, message, data)
+        if type_.startswith("session.") and type_ != "session.started":
+            self.tracer.flush()   # the run is over: send the tail before the process moves on
         self.ui.on_event(Event(type=type_, message=message, data=data))
 
     def _save_plan(self, plan: Plan) -> None:

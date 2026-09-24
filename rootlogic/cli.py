@@ -28,6 +28,7 @@ from .llm import AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
 from .moderation import offline_moderator
 from .prompts import EDITABLE, PromptSet
+from .tracing import traced_sink, tracer_from_env
 
 console = Console()
 # Brackets are Rich style tags, so the letters must be escaped or they vanish from the prompt.
@@ -165,12 +166,15 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
     # them up unless the caller passes an explicit set.
     prompt_set = prompt_set or PromptSet.from_overrides(store.prompts())
     holder: dict = {}
+    # Tracing is opt-in: a no-op tracer unless LANGFUSE_* is set and the extra is installed.
+    tracer = tracer_from_env()
     usage_sink = lambda u: store.record_call(  # noqa: E731
         session_id=holder["e"].sid or None, purpose=u.purpose, model=u.model,
         input_tokens=u.input_tokens, output_tokens=u.output_tokens,
         cache_read_tokens=u.cache_read_tokens, cache_write_tokens=u.cache_write_tokens,
         web_searches=u.web_searches, cost_usd=u.cost_usd, stop_reason=u.stop_reason,
         request_id=u.request_id)
+    usage_sink = traced_sink(usage_sink, tracer)
 
     worker_llm = None
     if offline:
@@ -189,12 +193,13 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
                             checkpoint_path=home / "checkpoints.db",
                             budget=budget, reports_dir=home / "reports", use_profile=use_profile,
                             source_policy=source_policy, moderator=moderator,
-                            prompt_set=prompt_set)
+                            prompt_set=prompt_set, tracer=tracer)
     else:
         eng = Orchestrator(llm, store, ui, worker_llm=worker_llm, budget=budget,
                            reports_dir=home / "reports",
                            use_profile=use_profile, source_policy=source_policy,
-                           moderator=moderator, prompt_set=prompt_set)
+                           moderator=moderator, prompt_set=prompt_set,
+                           tracer=tracer)
     holder["e"] = eng
     return eng
 

@@ -26,6 +26,28 @@ $ rootlogic research "impact of generative AI on local newsrooms"
 04:36:58 session.done       Report saved to .rootlogic/reports/c3b11a10-….md · 14 LLM calls · 212,480 tokens · $1.84
 ```
 
+## Tracing (optional)
+
+Every model request is already recorded in the `llm_calls` table and every decision in
+`events`, so tracing adds a viewer, not data. To send a run to a [Langfuse](https://langfuse.com)
+instance:
+
+```bash
+pip install -e '.[langfuse]'
+export LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... LANGFUSE_HOST=http://localhost:3000
+rootlogic research "your topic"            # traces appear under the session id
+```
+
+One trace per session, one generation per model request, one event per action-log entry — the
+same shape the action log has, so a reader of either sees the same run. It is off unless both
+keys are set, and every call is wrapped: a tracing backend that is down, misconfigured or of a
+different major version degrades to no tracing rather than failing the research.
+
+Verified against a self-hosted Langfuse v4: traces, generations and events arrive and group
+by session. Payload fields (model, token counts, cost) did **not** persist through that
+server's ingestion in testing, whether passed at span start or via `update()`, so treat
+`rootlogic usage` as the source of truth for cost and tokens and Langfuse as the timeline.
+
 ## Quick start
 
 ```bash

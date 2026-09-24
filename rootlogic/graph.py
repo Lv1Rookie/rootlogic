@@ -50,6 +50,7 @@ from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanD
                      Report, ReportDraft, SearchHit, SubTask, SubTaskDraft)
 from .orchestrator import Budget
 from .store import Store
+from .tracing import NullTracer, Tracer
 
 
 def _merge(current: dict | None, update: dict | None) -> dict:
@@ -91,7 +92,9 @@ class ResearchGraph:
                  budget: Budget | None = None, reports_dir: Path | str = "reports",
                  today: date | None = None, blocked_domains: tuple[str, ...] = (),
                  use_profile: bool = True, source_policy: SourcePolicy | None = None,
-                 moderator: Moderator | None = None, prompt_set: prompts.PromptSet | None = None):
+                 moderator: Moderator | None = None,
+                 prompt_set: prompts.PromptSet | None = None,
+                 tracer: Tracer | None = None):
         self.llm = llm                      # planning, reflection, analysis, writing, verifying
         self.worker = worker_llm or llm     # research sub-agents: most calls, most tokens
         self.store = store
@@ -101,6 +104,7 @@ class ResearchGraph:
         self.today = today or date.today()
         self.blocked_domains = blocked_domains
         self.prompts = prompt_set or prompts.PromptSet()   # editable per run; disclosed
+        self.tracer = tracer or NullTracer()   # optional Langfuse tracing
         self.use_profile = use_profile
         self.source_policy = source_policy   # None: the user's saved rules, read when needed
         self.moderation = ModerationGate(moderator, self._emit)
@@ -564,6 +568,9 @@ class ResearchGraph:
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
             self.store.add_event(self.sid, type_, message, data or None)
+        self.tracer.event(type_, message, data)
+        if type_.startswith("session.") and type_ not in ("session.started", "session.resumed"):
+            self.tracer.flush()   # the run is over: send the tail before the process moves on
         self.ui.on_event(Event(type=type_, message=message, data=data))
 
     # ================================================================== driving the graph
@@ -576,6 +583,7 @@ class ResearchGraph:
             raise ValueError(f"Unknown session {parent}")
         self.sid = self.store.create_session(topic, parent_id=parent)
         self.store.add_message(self.sid, "user", "topic", topic)
+        self.tracer.session(self.sid, topic)
         self._emit("session.started", f"Session {self.sid}: “{topic}” (LangGraph engine)")
         self._announce_prompts()
         try:
