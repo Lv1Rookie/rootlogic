@@ -227,10 +227,9 @@ h2 + .meta { margin-top: -4px; }
 .composer { padding: 0; overflow: hidden; transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
 .composer:focus-within { border-color: var(--accent-line); box-shadow: var(--sh-3); }
 .composer textarea {
-  border: none; background: none; border-radius: 0; box-shadow: none !important;
-  padding: 16px 18px 6px; font-size: 16px; line-height: 1.5; min-height: 76px;
+  background: none; padding: 14px 16px; font-size: 16px; line-height: 1.5; min-height: 84px;
+  margin: 12px 12px 0; width: calc(100% - 24px);
 }
-.composer textarea:focus { outline: none; }
 .composer textarea::placeholder { color: var(--faint); }
 .composer-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
@@ -246,17 +245,29 @@ h2 + .meta { margin-top: -4px; }
 @media (max-width: 720px) { .composer-keys { display: none; } }   /* no keyboard to speak of */
 
 /* ================================================================= controls */
+/* Fields follow uiverse.io/ErzenXz/horrible-rattlesnake-14 (MIT): a 12px radius, a hairline
+ * border that thickens on hover, and a shadow that lifts with it. Its hard-coded lightgrey
+ * and grey are taken from the palette instead, or the border would disappear in dark mode,
+ * and its 220px max-width is dropped - that sizes the author's demo, not a composer. */
 textarea, input[type=text], input[type=number], select {
   width: 100%; background: var(--panel); color: var(--ink);
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  padding: 8px 10px; min-height: var(--tap);
-  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  border: 1.5px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; min-height: var(--tap);
+  outline: none;
+  box-shadow: 0 0 20px -18px var(--ink);
+  transition: all .3s cubic-bezier(0.19, 1, 0.22, 1);
 }
 textarea::placeholder, input::placeholder { color: var(--faint); }
 textarea { resize: vertical; min-height: 78px; line-height: 1.5; }
-textarea:hover, input:hover, select:hover { border-color: var(--faint); }
+input[type=text], input[type=number] { height: 45px; }
+textarea:hover, input:hover, select:hover {
+  border: 2px solid var(--faint); box-shadow: 0 0 20px -17px var(--ink);
+}
+/* The press-in belongs to a button being clicked, not to a textarea mid-drag: a field that
+ * shrinks while you are selecting text inside it fights the selection. */
+input[type=text]:active, input[type=number]:active { transform: scale(0.98); }
 textarea:focus, input:focus, select:focus {
-  outline: none; border-color: var(--accent); box-shadow: var(--ring);
+  border: 2px solid var(--accent); box-shadow: var(--ring);
 }
 select {
   appearance: none; padding-right: 30px; cursor: pointer;
