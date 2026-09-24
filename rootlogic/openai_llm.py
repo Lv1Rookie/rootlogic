@@ -406,7 +406,27 @@ def _parse(purpose: str, schema: type[T], text: str | None) -> T:
     try:
         return schema.model_validate_json(cleaned)
     except ValidationError as e:
+        # A model that finishes the object and then keeps talking ("let me know if…") used to
+        # lose the whole answer to "trailing characters". Take the first complete object.
+        salvaged = _first_object(cleaned)
+        if salvaged is not None:
+            try:
+                return schema.model_validate(salvaged)
+            except ValidationError:
+                pass    # the object is genuinely wrong, not merely followed by chatter
         raise LLMError(f"{purpose}: response did not match {schema.__name__}: {_brief(e)}") from e
+
+
+def _first_object(text: str) -> dict | None:
+    """The first complete JSON object in ``text``, ignoring whatever follows it."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _brief(e: ValidationError) -> str:

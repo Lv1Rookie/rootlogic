@@ -559,3 +559,15 @@ def test_a_model_that_echoes_the_schema_is_told_so_by_name():
     # schema itself, which is what the model copied the first time
     assert "matches this JSON Schema" not in nudge, "re-showing the schema caused the echo"
     assert '"additionalProperties"' not in nudge
+
+
+def test_a_complete_object_followed_by_chatter_is_salvaged():
+    """Live failure on llama3.1: the planner emitted a valid PlanDraft and then carried on
+    writing, and the whole reply was rejected for "trailing characters" - throwing away an
+    answer that was already complete."""
+    reply = json.dumps(CLARIFY) + "\n\nLet me know if you would like me to expand on this!"
+    llm, fake, _ = make([completion(reply)], strict=False)
+
+    got = llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert got.needs_clarification is False
+    assert len(fake.calls) == 1, "salvaging costs nothing; a repair turn costs a call"
