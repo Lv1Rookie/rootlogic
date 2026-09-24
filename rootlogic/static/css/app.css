@@ -169,8 +169,7 @@ main {
 .theme-toggle:hover { color: var(--accent); border-color: var(--accent-line); }
 
 /* ---------------------------------------------------------------- sidebar sections */
-aside > form, aside > div:not(.brand) { position: relative; }
-aside > form:not(#start), aside > div:not(.brand):not(#suggest-wrap) { padding-top: 2px; }
+aside > form, aside > div:not(.brand), aside > details { position: relative; }
 
 h2 {
   font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
@@ -178,11 +177,51 @@ h2 {
 }
 h2 + .meta { margin-top: -4px; }
 
-/* #start gets a little more presence than the panels below it: it is the primary action. */
-#start {
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: var(--r-md); padding: 13px; box-shadow: var(--sh-1);
+/* ---------------------------------------------------------------- folds
+ * Suggestions and History are lists that grow without limit, so they collapse. <details>
+ * does the work: no state to keep, and the browser remembers nothing, which is what we want
+ * - a reopened page shows both open rather than a stale collapsed state.
+ */
+.fold > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px;
+  padding: 3px 0; border-radius: var(--r-sm);
 }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: "▸"; color: var(--faint); font-size: 11px; margin-left: auto;
+  transition: transform .18s var(--ease);
+}
+.fold[open] > summary::after { transform: rotate(90deg); }
+.fold > summary h2 { margin: 0; }
+.fold > summary:hover h2 { color: var(--muted); }
+.fold[open] > summary { margin-bottom: 7px; }
+.fold > :not(summary) { animation: fold-in .18s var(--ease) both; }
+@keyframes fold-in { from { opacity: 0; transform: translateY(-3px); } }
+
+/* Both lists can be long: give them their own scroll rather than pushing the sidebar down. */
+#history, #suggestions { max-height: 40vh; overflow-y: auto; margin: 0 -4px; padding: 2px 4px; }
+
+/* ================================================================= composer
+ * The topic input sits at the top of the main column, where every other assistant puts it,
+ * so the first thing a reader sees is the thing they are meant to type into.
+ */
+.composer { padding: 0; overflow: hidden; transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+.composer:focus-within { border-color: var(--accent-line); box-shadow: var(--sh-3); }
+.composer textarea {
+  border: none; background: none; border-radius: 0; box-shadow: none !important;
+  padding: 16px 18px 6px; font-size: 16px; line-height: 1.5; min-height: 76px;
+}
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--faint); }
+.composer-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px 12px; border-top: 1px solid var(--line-soft); background: var(--panel-2);
+}
+.composer-opts { gap: 10px 14px; row-gap: 8px; }
+.composer-opts select { width: auto; min-width: 160px; }
+.composer-opts input[type=number] { width: 62px; }
+.composer-opts label.inline { font-size: 13px; white-space: nowrap; }
+.composer-bar .btn.primary { padding: 8px 20px; }
 
 /* ================================================================= controls */
 textarea, input[type=text], input[type=number], select {
@@ -500,10 +539,16 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 /* ================================================================= responsive */
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
+  /* One column puts the sidebar first in the source, which would bury the composer under a
+   * screenful of settings. The run comes first; the settings follow it. */
+  main { order: 1; }
+  aside { order: 2; }
   aside {
-    position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line);
+    position: static; height: auto; border-right: none;
+    border-top: 1px solid var(--line); border-bottom: none;
     padding-bottom: 20px;
   }
+  #history, #suggestions { max-height: 55vh; }   /* still capped: a long list is a long scroll */
   .brand { position: static; backdrop-filter: none; }
   main { padding: 16px 16px 72px; }
   .statusbar { position: static; }
@@ -512,6 +557,8 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
   .ev .msg { grid-column: 1 / -1; padding-left: 66px; text-indent: -66px; }
 }
 @media (max-width: 560px) {
+  .composer-bar { flex-direction: column; align-items: stretch; }
+  .composer-bar .btn.primary { width: 100%; }
   .statusbar .row { width: 100%; }
   .statusbar .row .btn { flex: 1 1 auto; }
   #tab-report { font-size: 15px; }

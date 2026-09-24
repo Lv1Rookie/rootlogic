@@ -439,3 +439,15 @@ def test_report_typography_is_scoped_to_the_report_tab():
             continue
         assert selector.startswith(".report-actions"), \
             f"bare .report selector also hits log rows: {selector}"
+
+
+def test_timestamps_are_rendered_in_the_reader_timezone():
+    """The store writes UTC, which is right for the log and wrong for the reader: history
+    rows showed 17:14 for a run at 13:14 in New York."""
+    from pathlib import Path
+    js = Path(__file__).resolve().parents[1] / "rootlogic" / "static" / "js"
+    for name, helper in (("history.js", "localStamp"), ("log.js", "localTime")):
+        text = (js / name).read_text()
+        assert helper in text, f"{name} should format times through {helper}"
+        assert ".slice(11, 19)" not in text and ".slice(0, 16)" not in text, \
+            f"{name} still slices the raw UTC string"

@@ -1,6 +1,6 @@
 // Past sessions: the sidebar list, suggested follow-up topics, and reopening a session.
 
-import { $, esc, md } from "./dom.js";
+import { $, esc, md, localStamp, localZone } from "./dom.js";
 import { api } from "./api.js";
 import { state, resetView, setStatus, showTab } from "./state.js";
 import { setPlan, trackTask } from "./plan.js";
@@ -12,6 +12,8 @@ import { setReport } from "./export.js";
 
 export async function loadHistory() {
   const { sessions, suggestions } = await api("/api/sessions");
+  const zone = $("#history-zone");
+  if (zone) zone.textContent = localZone();   // times below are the reader's own clock
   const h = $("#history");
   h.innerHTML = sessions.length ? "" : `<div class="meta">No sessions yet.</div>`;
   for (const s of sessions) {
@@ -20,7 +22,7 @@ export async function loadHistory() {
     el.className = "item" + (s.id === state.sid ? " active" : "");
     el.innerHTML = `<span class="t">${esc(s.topic)}</span><span class="pill ${esc(s.status)}">${esc(s.status)}</span>
       <span class="m">${s.parent_id ? "↳ follows " + esc(s.parent_id) + " · " : ""}${
-        esc(s.created_at.slice(0, 16).replace("T", " "))} · $${s.cost_usd.toFixed(2)} · ${esc(s.id)}</span>`;
+        esc(localStamp(s.created_at))} · $${s.cost_usd.toFixed(2)} · ${esc(s.id)}</span>`;
     el.onclick = () => openSession(s.id);
     h.appendChild(el);
   }

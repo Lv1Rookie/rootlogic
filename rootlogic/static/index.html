@@ -26,31 +26,10 @@
       </button>
     </div>
 
-    <form id="start" class="stack">
-      <h2>New research</h2>
-      <textarea id="topic" placeholder="What should I research?" required></textarea>
-      <div class="row">
-        <select id="engine" style="flex:1" title="Orchestration engine">
-          <option value="loop">Engine: loop</option>
-          <option value="graph">Engine: LangGraph (resumable)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label class="inline" title="Web searches each sub-agent may run">Searches
-          <input type="number" id="searches" min="1" max="20" value="4" style="width:64px"></label>
-        <label class="inline" title="Sub-agents researching at once. Use 1 for a local model: it is one server.">Parallel
-          <input type="number" id="parallel" min="1" max="8" value="2" style="width:64px"></label>
-      </div>
-      <div class="row" style="justify-content:space-between">
-        <label class="inline"><input type="checkbox" id="offline"> Offline demo</label>
-        <button class="btn primary" type="submit">Research</button>
-      </div>
-    </form>
-
-    <div id="suggest-wrap" class="hidden">
-      <h2>Suggested next</h2>
+    <details id="suggest-wrap" class="fold hidden" open>
+      <summary><h2>Suggested next</h2></summary>
       <div id="suggestions" class="chips"></div>
-    </div>
+    </details>
 
     <div>
       <h2>Your profile</h2>
@@ -82,13 +61,33 @@
       <div id="prompts" class="stack" style="gap:4px;margin-top:6px"></div>
     </div>
 
-    <div>
-      <h2>History</h2>
+    <details id="history-wrap" class="fold" open>
+      <summary><h2>History</h2><span class="meta" id="history-zone"></span></summary>
       <div id="history" class="list"><div class="meta">No sessions yet.</div></div>
-    </div>
+    </details>
   </aside>
 
   <main>
+    <form id="start" class="panel composer">
+      <textarea id="topic" rows="3" placeholder="What should I research?" required
+                aria-label="Research topic"></textarea>
+      <div class="composer-bar">
+        <div class="row composer-opts">
+          <select id="engine" title="Orchestration engine" aria-label="Orchestration engine">
+            <option value="loop">Engine: loop</option>
+            <option value="graph">Engine: LangGraph (resumable)</option>
+          </select>
+          <label class="inline" title="Web searches each sub-agent may run">Searches
+            <input type="number" id="searches" min="1" max="20" value="4"></label>
+          <label class="inline" title="Sub-agents researching at once. Use 1 for a local model: it is one server.">Parallel
+            <input type="number" id="parallel" min="1" max="8" value="2"></label>
+          <label class="inline" title="Run with a fake model and fake search: no API key, no cost">
+            <input type="checkbox" id="offline"> Offline demo</label>
+        </div>
+        <button class="btn primary" type="submit">Research</button>
+      </div>
+    </form>
+
     <div id="welcome" class="panel empty">
       <p><b>Give me a topic.</b> I'll ask clarifying questions if needed, propose a plan you can edit,
         research in parallel, filter stale sources, check for contradictions and write a cited report.</p>
