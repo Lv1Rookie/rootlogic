@@ -101,6 +101,15 @@ $("#unpause").onclick = () => {
 $("#override").onclick = () =>
   api(`/api/runs/${state.run}/checkpoint`, { method: "POST" }).catch(e => alert(e.message));
 
+// Fold the status bar away. It is sticky, so while a long report is being read it sits on
+// top of the text; the chevron gives that back without giving up the run controls for good.
+$("#bar-toggle").onclick = () => {
+  const bar = $("#statusbar");
+  const collapsed = bar.classList.toggle("collapsed");
+  $("#bar-toggle").setAttribute("aria-expanded", String(!collapsed));
+  $("#bar-toggle").title = collapsed ? "Show the status bar" : "Hide the status bar";
+};
+
 $("#abort").onclick = () => {
   if (!confirm("Stop this run? Work already finished is kept, but no further research runs.")) return;
   api(`/api/runs/${state.run}/abort`, { method: "POST" }).catch(e => alert(e.message));

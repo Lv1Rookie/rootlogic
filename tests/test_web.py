@@ -453,12 +453,17 @@ def test_timestamps_are_rendered_in_the_reader_timezone():
             f"{name} still slices the raw UTC string"
 
 
-def test_each_fold_carries_a_drawn_marker():
+def test_everything_that_folds_carries_a_drawn_marker():
     """A text glyph cannot be centred in a box - it brings its own side bearings - so the
-    disclosure marker is an SVG. Both folds must have one, or a section looks static."""
+    disclosure marker is an SVG. Anything that folds needs one, or it looks static: the
+    sidebar's sections and the status bar, which can be folded away off the report."""
     from pathlib import Path
     html = (Path(__file__).resolve().parents[1] / "rootlogic" / "static" / "index.html").read_text()
-    assert html.count('class="fold-mark"') == 2, "every .fold summary needs its marker"
+    folds = html.count('class="fold hidden"') + html.count('class="fold"')
+    assert folds >= 2, "expected the suggestions and history folds"
+    assert html.count('class="fold-mark"') == folds + 1, \
+        "one marker per fold, plus the status bar's own"
+    assert 'id="bar-toggle"' in html, "the status bar needs a control to fold it"
     assert 'id="history-zone"' in html and 'class="zone"' in html, \
         "the timezone label wears the heading's type, not .meta"
 

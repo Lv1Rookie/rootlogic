@@ -381,6 +381,35 @@ label.inline:hover { color: var(--ink); }
 /* Abort sits apart from the controls that keep a run alive, so it is harder to hit by accident. */
 .statusbar #abort { margin-left: 4px; }
 
+/* ---------------------------------------------------------------- collapsing the bar
+ * The bar follows the reader down the page, which is what makes the controls reachable and
+ * also what makes it sit on top of the report. It folds away to a single line, leaving the
+ * status pill so a run is never silently out of sight, and the same chevron the sidebar
+ * sections use to say so. */
+.statusbar-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bar-toggle {
+  border: none; background: none; padding: 0; cursor: pointer; color: var(--muted);
+  display: grid; place-items: center; flex: none;
+}
+.bar-toggle .fold-mark {
+  transform: rotate(-90deg);          /* points up: this closes the bar */
+  margin: 0;
+}
+.bar-toggle:hover .fold-mark { color: var(--accent); border-color: var(--accent-line); }
+.statusbar.collapsed .bar-toggle .fold-mark { transform: rotate(90deg); }
+.statusbar.collapsed { padding: 8px 14px; gap: 8px; }
+.statusbar.collapsed .topic {
+  font-size: 14px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 46vw;
+}
+/* the pill rides up onto the title line: folded away is not the same as gone quiet */
+.statusbar.collapsed .statusbar-head > div {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+}
+.statusbar.collapsed .meta { margin: 0; flex: none; }
+.statusbar.collapsed #v-meta { display: none; }
+.statusbar.collapsed .row { display: none; }
+
 .meta { color: var(--muted); font-size: 13px; }
 
 /* ---------------------------------------------------------------- request cards */

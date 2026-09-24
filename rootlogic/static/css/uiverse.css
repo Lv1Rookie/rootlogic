@@ -212,9 +212,18 @@
   0% { transform: translateY(-10px); opacity: 0; }
   100% { transform: translateY(0px); opacity: 1; }
 }
-/* the two buttons do different things, so each says which under it */
-.uiv-dl-group { display: flex; align-items: flex-start; gap: 4px; flex-direction: column; }
-.uiv-dl-label { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+/* The two buttons do different things, so each says which under it - centred on its own
+ * button rather than ranged left under a 50px square, where the label looked adrift. */
+.uiv-dl-group {
+  display: flex; flex-direction: column; align-items: center; gap: 5px; width: 50px; flex: none;
+}
+.uiv-dl-label {
+  font-size: 11px; letter-spacing: .02em; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1;
+}
+.uiv-dl-group:hover .uiv-dl-label { color: var(--ink); }
+/* and the pair says what it is a download of */
+.uiv-dl-lead { font-size: 13px; color: var(--muted); margin-right: 2px; align-self: center; }
 
 /* ================================================================= checkbox */
 .uiv-check {
