@@ -171,8 +171,22 @@ calls an `Interaction` object for four things: `ask`, `review_plan`, `override` 
 - The terminal UI implements `Interaction`, and so do the tests.
 - The web UI (Step 14) is one more implementation, with no change to the core.
 - Ctrl-C only sets a "pause" flag, and the web UI's Pause sets a "hold" flag. Both are read at
-  sub-task boundaries, so neither ever stops halfway through a step. A pause hands control to
-  `Interaction.override` and continues once answered; a hold simply waits for Resume.
+  sub-task boundaries, so neither ever stops halfway through a step.
+
+**Three controls, three different promises.** These were once one button, and conflating them
+was a bug in its own right (Step 21):
+
+| Control | Promise | Lands at | Run afterwards |
+|---|---|---|---|
+| **Pause** | stop and stay stopped | next sub-task boundary | held, doing nothing, until Resume |
+| **Override** | keep going, but differently | end of the wave | continues with the edited plan |
+| **Abort** | this was a mistake | next sub-task boundary | ends, marked `aborted` |
+
+Override is the slowest of the three on purpose: it hands the user a plan to edit, and the plan
+is not stable until the wave that is rewriting it has finished. Abort has no plan to offer, so
+it never waits for one. `Control` keeps the three flags apart — a hold gate (`request_hold` /
+`release`), a pause flag (`consume_pause`) and an abort flag — and announces a pause or an abort
+once however many sub-agent threads notice it at the same moment.
 
 **Sub-agents report as they work.** A first live run showed the weakness of coarse events: after
 three `task.started` lines the screen sat still for minutes, with no way to tell research from a
@@ -549,7 +563,7 @@ Every change went through the same routine:
 ## Step 21: Run it for real, on a laptop, for free
 
 176 mocked tests passed before the first live run. Then every real run broke something new.
-Nine defects came out of live testing, none of them reachable by the test suite as it stood,
+Twelve defects came out of live testing, none of them reachable by the test suite as it stood,
 and each one is now covered by a test that fails against the old code.
 
 | What broke | Why the tests missed it | Fix |
@@ -563,6 +577,9 @@ and each one is now covered by a test that fails against the old code.
 | A 1B Llama Guard flagged a newsroom report as violent crime and binned it | `StaticModerator` never false-positives | say how to recover the research |
 | A backgrounded run died on its first clarifying question | tests answer prompts | treat closed stdin as "no answer" |
 | A gateway timed out on every substantial call | nothing sat between us and the model | `--stream`, and catch the base `APIError` |
+| Pause appeared to do nothing | tests call the engine directly and never wait | check the flag per sub-task, not per wave |
+| Abort could not be reached at all | no test drove the UI's control flow | its own button and endpoint, independent of Pause |
+| Abort took nine minutes to land | fakes succeed, so the failure path was never timed | check for an abort on that path too |
 
 Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
 path — a graded requirement, passing its unit tests, doing nothing in production, because
@@ -575,6 +592,53 @@ fetch = lambda url: (p := search.fetch(url)).text if not p.error else None
 
 A conditional expression evaluates its condition first, so `not p.error` ran before the walrus
 bound `p`. It could never have worked, and no mocked test built that lambda at all.
+
+### What pressing the buttons taught the controls
+
+The last three defects came from a different kind of live test: not "does the research work"
+but "can I stop it". All three were invisible to the suite because a test calls
+`engine.run()` and waits for it to return — nobody is sitting there pressing anything.
+
+**Pause looked broken because it was checked once per wave.** A wave is one model call per
+sub-task, which on a hosted model is a minute and on a local 8B model is twenty. The flag was
+read between waves, so the button did nothing observable for the length of a coffee break. It
+is now read at every sub-task boundary — the finest safe point available, since a model call in
+flight cannot be interrupted but the next one need not start.
+
+**Pause also wasn't a pause.** It stopped the run to show an override card and then continued as
+soon as that card was answered. Useful, but not what the word promises. Pause is now a hold: a
+gate the run waits on, released only by Resume, spending nothing while it waits. The old
+behaviour kept its own button, Override, which is what the inline Skip and Steer controls use.
+
+**Abort was unreachable.** It existed only *inside* the override card — which appears after a
+pause has been honoured. So the control for "stop this now" was behind the control that was too
+slow to press, and a run that would not pause could not be stopped at all.
+
+Fixing those three was not the end of it, because the first live abort took **nine minutes**.
+The wave loop looked like this:
+
+```python
+except (LLMError, AgentRefusal) as e:
+    self._task_failed(t, str(e))
+    continue                      # ← jumps past the abort check below
+self._accept_finding(plan, t, result)
+self._abort_if_requested()
+```
+
+Every sub-task in that run was failing — the search key was invalid, so every query returned
+HTTP 401 — which meant every sub-task took the `continue` and no sub-task ever reached the
+check. The abort was not ignored; it was never looked at. A retried task then opened a *fresh*
+model call, because the worker checked the hold flag but not the abort flag, spending minutes
+generating a finding already destined for the bin.
+
+Both paths are boundaries now. The same run aborts in **thirty-one seconds**, which is one
+in-flight model call — that request cannot be cancelled, so one sub-task is the floor for how
+fast Abort can possibly be. The regression test reproduces the live conditions exactly: every
+sub-task fails, and the assertion is that no further research calls happen after the abort.
+
+The lesson generalises past this project. **A control-plane feature needs a test that races
+it**, because the interesting bugs live in the gap between "the flag is set" and "the code
+looks at the flag" — and that gap only exists while something else is running.
 
 The pattern worth taking away: **the tests all took the same path through the code.** Claude's
 hosted tools mean `search is None`, which skipped the client-side search branch, the fetcher,
@@ -592,7 +656,7 @@ facts. The machinery is sound either way; the judgement is only as good as the m
 
 ## What to do next
 
-1. **Run it.** Free and local, which is how Step 21's nine defects were found:
+1. **Run it.** Free and local, which is how Step 21's twelve defects were found:
 
    ```bash
    brew install ollama && ollama serve          # or: brew services start ollama
