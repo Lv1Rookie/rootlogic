@@ -4,8 +4,8 @@ An agentic **personal research assistant** for journalists, analysts and student
 Give it a topic; it asks clarifying questions if needed, drafts a research plan you can
 edit, dispatches parallel research sub-agents that search the web, filters outdated or
 irrelevant sources, reflects on gaps (researching more or asking you), cross-checks
-sources for contradictions, and writes a cited report. Every step is logged and you
-can pause and override it at any time.
+sources for contradictions, and writes a cited report. Every step is logged, and you can
+pause, redirect or abort it at any time.
 
 Illustrative session (numbers are examples, not a benchmark):
 
@@ -313,15 +313,28 @@ rootlogic uses what you tell it, not just what it searches:
 
 - **Start** a run (topic, engine, offline toggle), with suggested next topics from memory.
 - **Answer** clarifying questions, then **edit the plan** (drop/add sub-tasks, set max source age) before anything is spent.
-- **Pause** mid-run: the run holds at its next sub-task boundary and stays there until **Resume**.
-- **Override** mid-run: skip pending tasks, add one, give guidance, or stop and write now.
-- **Abort** at any time, without waiting for a pause to be honoured first.
+- **Steer it mid-run** with three controls that make three different promises:
+
+  | Button | Use it when | Lands at | Afterwards |
+  |---|---|---|---|
+  | **Pause** → **Resume** | you want to read the log before deciding | next sub-task boundary | held, spending nothing, until you resume |
+  | **Override** | the research is working but heading the wrong way | end of the current wave | continues with your edits applied |
+  | **Abort** | you typed the wrong topic, or it's on the wrong model | next sub-task boundary | ends, marked `aborted` — Retry still reuses finished work |
+
+  Override opens a card to skip pending sub-tasks, add a question, give guidance ("focus on the
+  EU", which is fed into the remaining sub-agents' prompts), or stop researching and write now.
+  Skip and Steer on the sub-agent cards use the same path. Override waits for the wave because
+  it hands you a plan to edit and the plan is not stable until the wave rewriting it finishes;
+  Abort has no plan to offer, so it lands within one in-flight model call. None of the three can
+  interrupt a request already sent to the model — one sub-task is the floor for all of them.
 - **Watch** the live action log and plan status, then read the rendered report and per-step token/cost table.
 - **History:** reopen any past session. Sessions left `interrupted` by a server restart can be **resumed** (graph engine).
 
 How it works: each run executes in a background thread. `WebInteraction` implements the same
 `Interaction` protocol as the terminal UI. When the agent needs a human it publishes a `request`
-event and blocks until the browser POSTs an answer. The browser follows one SSE stream
+event and blocks until the browser POSTs an answer. The controls are their own endpoints —
+`POST /api/runs/{id}/pause`, `/resume`, `/checkpoint` (override) and `/abort` — so stopping a run
+never depends on a card having been answered first. The browser follows one SSE stream
 (`GET /api/runs/{id}/events`) whose events carry sequential ids, so a refresh replays from
 `Last-Event-ID` and rebuilds the page. Report Markdown is sanitized (DOMPurify) before rendering.
 It binds to 127.0.0.1 because there is no authentication and runs spend API credits.
