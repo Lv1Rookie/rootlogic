@@ -425,8 +425,54 @@ def _first_object(text: str) -> dict | None:
     try:
         payload, _ = json.JSONDecoder().raw_decode(text[start:])
     except ValueError:
-        return None
+        return _closed_off(text[start:])
     return payload if isinstance(payload, dict) else None
+
+
+def _closed_off(text: str) -> dict | None:
+    """Rescue an object the model stopped writing halfway through.
+
+    Seen live: a planner that ended its turn - finish_reason "stop", nothing truncating it but
+    itself - partway through the last of seven sub-tasks. The six that had arrived were
+    complete and usable, and the whole plan was discarded over the seventh.
+
+    Each point where a value had just finished is a place the text could have ended honestly,
+    so those are tried from the last backwards, closing whatever containers were still open.
+    The first that parses wins. A half-written element is dropped rather than guessed at, and
+    the caller still validates, so a rescue that is missing something required fails there.
+    """
+    stack: list[str] = []
+    cuts: list[tuple[int, str]] = []      # (index to cut at, the closers needed there)
+    in_string = escaped = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            if stack:                     # a value just closed inside something still open
+                cuts.append((i + 1, "".join(reversed(stack))))
+        elif ch == "," and stack:
+            cuts.append((i, "".join(reversed(stack))))
+
+    for cut, closers in reversed(cuts):
+        try:
+            payload = json.loads(text[:cut] + closers)
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
 
 
 def _brief(e: ValidationError) -> str:

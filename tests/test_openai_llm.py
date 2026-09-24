@@ -571,3 +571,23 @@ def test_a_complete_object_followed_by_chatter_is_salvaged():
     got = llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
     assert got.needs_clarification is False
     assert len(fake.calls) == 1, "salvaging costs nothing; a repair turn costs a call"
+
+
+def test_a_plan_cut_off_mid_object_keeps_the_sub_tasks_that_arrived():
+    """Live failure on llama3.1: the planner stopped mid-object - finish_reason "stop", not
+    "length", so nothing was truncating it but the model itself - and "EOF while parsing"
+    threw away six complete sub-tasks along with the seventh half-written one."""
+    from rootlogic.models import PlanDraft
+
+    full = {"objective": "Assess honey against cough syrup", "recency_days": 0,
+            "subtasks": [{"question": f"Question {i}?", "rationale": "because",
+                          "search_queries": ["q"], "depends_on": []} for i in (1, 2, 3)]}
+    text = json.dumps(full)
+    cut = text[:text.index('"Question 3?"') + 8]         # stops partway through the last one
+
+    llm, fake, _ = make([completion(cut), completion(cut)], strict=False)
+    got = llm.structured(purpose="plan", system="s", prompt="p", schema=PlanDraft)
+
+    assert [t.question for t in got.subtasks] == ["Question 1?", "Question 2?"], \
+        "the sub-tasks that arrived whole should survive the one that did not"
+    assert got.objective == "Assess honey against cough syrup"
