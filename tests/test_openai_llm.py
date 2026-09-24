@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletion
 
 from rootlogic.backend import Backend, BackendError, parse_prices
 from rootlogic.llm import AgentRefusal, LLMError
-from rootlogic.models import Clarification, FindingDraft
+from rootlogic.models import Clarification, FindingDraft, PlanDraft
 from rootlogic.openai_llm import OpenAICompatibleLLM
 from rootlogic.search import SearchResult, StaticSearch
 
@@ -510,3 +510,29 @@ def test_the_loop_stops_offering_tools_once_their_budgets_are_spent():
     assert "tools" not in api.calls[-1]             # the last call asked for findings only
     assert api.calls[-1]["response_format"]["json_schema"]["strict"] is True
     assert len(hits) == 4                           # the search hit plus three fetched pages
+
+
+def test_strict_mode_recovers_when_a_server_ignores_the_schema():
+    """Live through a gateway: clarify parsed but plan came back as unparseable text -
+    'Invalid JSON: expected value at line 1 column 186'. Strict mode assumed the server had
+    honoured response_format and gave up; non-strict mode had always repaired."""
+    plan = {"objective": "o", "recency_days": 365, "subtasks": [
+        {"question": "q", "rationale": "r", "search_queries": ["s"], "depends_on": []}]}
+    llm, api, _ = make([completion("Here is the plan:\n```json\n{\"objective\": \"o\","),
+                        completion(json.dumps(plan))])
+
+    out = llm.structured(purpose="plan", system="s", prompt="p", schema=PlanDraft)
+
+    assert out.objective == "o"
+    assert len(api.calls) == 2
+    assert "response_format" in api.calls[0]           # asked properly the first time
+    retry = api.calls[1]["messages"]
+    assert retry[-1]["role"] == "user" and "corrected JSON" in retry[-1]["content"]
+    assert "JSON Schema" in retry[-1]["content"]       # and spells the schema out
+
+
+def test_strict_mode_gives_up_after_one_repair():
+    llm, api, _ = make([completion("not json"), completion("still not json")])
+    with pytest.raises(LLMError, match="did not match"):
+        llm.structured(purpose="plan", system="s", prompt="p", schema=PlanDraft)
+    assert len(api.calls) == 2

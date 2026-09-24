@@ -126,17 +126,30 @@ class OpenAICompatibleLLM:
             fmt = {"type": "json_schema", "json_schema": {
                 "name": schema.__name__, "schema": json_schema(schema), "strict": True}}
             message = self._create(purpose, messages=messages, response_format=fmt)
-            return _parse(purpose, schema, message.content)
+            try:
+                return _parse(purpose, schema, message.content)
+            except LLMError as e:
+                # Asking for a schema is not the same as getting one: a gateway may drop
+                # response_format on its way upstream, and the reply comes back as prose or
+                # half-fenced JSON. Seen live, where a small schema parsed and a larger one
+                # broke mid-object. Repair the same way non-strict mode always has.
+                return self._repair(purpose, messages, schema, message, e)
 
         messages[1]["content"] += _json_instruction(schema)
         message = self._create(purpose, messages=messages)
         try:
             return _parse(purpose, schema, message.content)
-        except LLMError as first_error:  # one repair attempt, showing the model its mistake
-            messages += [{"role": "assistant", "content": message.content or ""},
-                         {"role": "user", "content": f"That was not valid: {first_error}. "
-                                                     "Reply with only the corrected JSON."}]
-            return _parse(purpose, schema, self._create(purpose, messages=messages).content)
+        except LLMError as e:
+            return self._repair(purpose, messages, schema, message, e)
+
+    def _repair(self, purpose: str, messages: list[dict], schema: type[T], message,
+                error: LLMError) -> T:
+        """One more attempt, showing the model its own reply and what was wrong with it."""
+        messages = [*messages,
+                    {"role": "assistant", "content": message.content or ""},
+                    {"role": "user", "content": f"That was not valid: {error}. Reply with only "
+                                                f"the corrected JSON.{_json_instruction(schema)}"}]
+        return _parse(purpose, schema, self._create(purpose, messages=messages).content)
 
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
