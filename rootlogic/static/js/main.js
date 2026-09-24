@@ -96,6 +96,21 @@ $("#resume").onclick = async () => {
   } catch (err) { alert(err.message); }
 };
 
+$("#retry").onclick = async () => {
+  if (!state.sid) return;
+  try {
+    const run = await api(`/api/sessions/${state.sid}/retry`, {
+      method: "POST", body: { offline: $("#offline").checked, engine: $("#engine").value },
+    });
+    const topic = $("#v-topic").textContent;
+    resetView(topic);
+    state.run = run.run_id;
+    state.sid = run.session_id || null;
+    setStatus("running");
+    follow(run.run_id);
+  } catch (err) { alert(err.message); }
+};
+
 $("#forget").onclick = async () => {
   if (!state.sid || !confirm("Delete this session, its log and its memory?")) return;
   await api(`/api/sessions/${state.sid}`, { method: "DELETE" });

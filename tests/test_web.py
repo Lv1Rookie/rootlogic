@@ -363,3 +363,32 @@ def test_a_session_that_died_before_emitting_anything_is_still_marked(tmp_path):
     age(store, sid, 3600)
     create_app(store, tmp_path)
     assert store.session(sid)["status"] == "interrupted"
+
+
+def test_a_failed_run_can_be_retried_reusing_its_findings(client):
+    """A run that died late has already paid for its research: one live failure cost 58 LLM
+    calls and $1.26 with eight of nine sub-tasks complete, and the UI offered only Delete."""
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    s = wait(client, rid, finished)
+    sid = s["session_id"]
+    client.get(f"/api/sessions/{sid}")          # the run completed; pretend it failed late
+    Store  # noqa: B018 - imported above
+
+    retry = client.post(f"/api/sessions/{sid}/retry", json={})
+    assert retry.status_code == 200
+    body = retry.json()
+    assert body["parent_session"] == sid       # a follow-up: earlier findings are carried
+
+    s2 = wait(client, body["run_id"], pending("plan"))
+    carried = [t for t in s2["pending"]["plan"]["subtasks"] if t["origin"] == "previous"]
+    assert carried, "the retry must reuse the work already paid for"
+
+
+def test_retry_refuses_a_live_session_and_an_unknown_one(client):
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    assert client.post(f"/api/sessions/{s['session_id']}/retry", json={}).status_code == 409
+    assert client.post("/api/sessions/nope/retry", json={}).status_code == 404

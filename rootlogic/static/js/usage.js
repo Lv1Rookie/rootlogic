@@ -19,6 +19,12 @@ export function renderUsage(d) {
 }
 
 export function maybeResume(d) {
-  const resumable = ["failed", "interrupted"].includes(d.session.status) && !state.run;
-  $("#resume").classList.toggle("hidden", !resumable);
+  const stopped = ["failed", "interrupted", "aborted"].includes(d.session.status) && !state.run;
+  // Resume replays a checkpoint, so it needs the graph engine. Retry works for any engine:
+  // it starts a follow-up that carries the finished sub-tasks in.
+  const isGraph = (d.events || []).some(e => (e.message || "").includes("LangGraph engine"));
+  const done = (d.session.plan_json || "").includes('"status":"done"');
+  $("#resume").classList.toggle("hidden", !(stopped && isGraph));
+  $("#retry").classList.toggle("hidden", !stopped);
+  $("#retry").textContent = done ? "Retry (keeps finished work)" : "Retry";
 }

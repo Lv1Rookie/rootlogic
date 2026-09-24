@@ -193,6 +193,7 @@ class Answer(BaseModel):
 
 class ResumeRun(BaseModel):
     offline: bool = False
+    engine: Literal["loop", "graph"] | None = None   # retry may switch engines
 
 
 # =================================================================== app
@@ -344,6 +345,25 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         return {"session": s, "events": store.events(sid), "messages": store.messages(sid),
                 "sources": store.sources(sid), "usage": store.usage(sid),
                 "usage_by_purpose": store.usage_by_purpose(sid), "report": report}
+
+    @app.post("/api/sessions/{sid}/retry")
+    def retry(sid: str, body: ResumeRun) -> dict:
+        """Pick up a run that failed or was interrupted, without paying for its research again.
+
+        Checkpoint resume only exists for the graph engine, but every finished sub-task is in
+        the database whatever the engine, so a retry is a follow-up on the same topic: the
+        completed findings are carried in and only the missing work is researched.
+        """
+        s = store.session(sid)
+        if not s:
+            raise HTTPException(404, "Unknown session")
+        if any(r.sid == sid and not r.finished for r in runs.values()):
+            raise HTTPException(409, "Session is already running")
+        run = Run(s["topic"], body.engine or "loop", body.offline, parent=sid)
+        runs[run.id] = run
+        run.budget = Budget()
+        launch(run, "run", run.topic, run.budget, parent=sid)
+        return run.summary()
 
     @app.post("/api/sessions/{sid}/resume")
     def resume(sid: str, body: ResumeRun) -> dict:
