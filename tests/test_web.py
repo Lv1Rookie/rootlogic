@@ -426,3 +426,16 @@ def test_pause_holds_the_run_and_resume_releases_it(client):
     types = [e["type"] for e in sse_events(client, rid)]
     assert types.index("control.paused") < types.index("control.resumed")
     assert types.index("control.resumed") < types.index("report.started")
+
+
+def test_report_typography_is_scoped_to_the_report_tab():
+    """The action log gives every event a class from its family, so `report.started` renders
+    as `<div class="ev report">`. Styling bare `.report` therefore resized log lines."""
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "rootlogic" / "static" / "css" / "app.css").read_text()
+    for line in css.splitlines():
+        selector = line.split("{")[0].strip()
+        if not selector.startswith(".report"):
+            continue
+        assert selector.startswith(".report-actions"), \
+            f"bare .report selector also hits log rows: {selector}"
