@@ -107,7 +107,8 @@ $("#forget").onclick = async () => {
 
 // Remember engine/offline choices (per-browser convenience only).
 for (const [id, prop] of [["engine", "value"], ["offline", "checked"],
-                          ["use-profile", "checked"], ["verify", "checked"]]) {
+                          ["use-profile", "checked"], ["verify", "checked"],
+                          ["searches", "value"], ["parallel", "value"]]) {
   try {
     const v = localStorage.getItem("rootlogic." + id);
     if (v !== null) $("#" + id)[prop] = JSON.parse(v);

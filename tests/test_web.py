@@ -313,3 +313,19 @@ def test_stored_events_carry_data_as_an_object(client):
     assert with_data, events
     for e in with_data:
         assert isinstance(e["data"], dict), e
+
+
+def test_a_run_can_set_searches_and_parallelism(client):
+    """A local model is one server: 8 searches per sub-agent and 4 in parallel starves it.
+    The CLI has always had these knobs; the web UI could not reach them."""
+    run = client.post("/api/runs", json={"topic": "impact of generative AI on newsrooms",
+                                         "offline": True, "max_searches": 2,
+                                         "max_parallel": 1}).json()
+    d = wait(client, run["run_id"], lambda r: r["events"] >= 3)
+    budget = client.get(f"/api/runs/{d['run_id']}").json()["budget"]
+    assert budget["max_searches"] == 2 and budget["max_parallel"] == 1
+
+
+def test_search_and_parallel_limits_are_bounded(client):
+    assert client.post("/api/runs", json={"topic": "x y", "max_searches": 99}).status_code == 422
+    assert client.post("/api/runs", json={"topic": "x y", "max_parallel": 0}).status_code == 422

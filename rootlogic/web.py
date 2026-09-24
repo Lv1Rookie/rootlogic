@@ -54,6 +54,7 @@ class Run:
         self.engine_name = engine
         self.offline = offline
         self.engine: Any = None
+        self.budget: Any = None            # the caps this run was started with
         self.status = "running"            # running | done | aborted | failed
         self.events: list[dict] = []
         self.pending: dict | None = None   # the request currently waiting for the user
@@ -106,7 +107,8 @@ class Run:
         return {"run_id": self.id, "session_id": self.sid, "topic": self.topic,
                 "engine": self.engine_name, "offline": self.offline, "status": self.status,
                 "parent_session": self.parent,
-                "pending": self.pending, "events": len(self.events)}
+                "pending": self.pending, "events": len(self.events),
+                "budget": vars(self.budget) if self.budget else None}
 
 
 class WebInteraction:
@@ -167,6 +169,10 @@ class StartRun(BaseModel):
     parent_session: str | None = None   # follow up on this earlier session
     use_profile: bool = True
     verify_claims: int = Field(12, ge=0, le=40)  # 0 disables claim verification
+    # A local model is one server: many searches and parallel sub-agents starve it, while a
+    # hosted API benefits from both. The CLI has always exposed these; the UI needs them too.
+    max_searches: int = Field(8, ge=1, le=20)    # web searches per sub-agent
+    max_parallel: int = Field(4, ge=1, le=8)     # concurrent research sub-agents
 
 
 class NewSourceRule(BaseModel):
@@ -255,8 +261,10 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
             raise HTTPException(404, "Unknown parent session")
         run = Run(body.topic.strip(), body.engine, body.offline, parent=body.parent_session)
         runs[run.id] = run
-        launch(run, "run", run.topic, Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks,
-                                             verify_claims=body.verify_claims),
+        run.budget = Budget(max_rounds=body.max_rounds, max_tasks=body.max_tasks,
+                            verify_claims=body.verify_claims, max_searches=body.max_searches,
+                            max_parallel=body.max_parallel)
+        launch(run, "run", run.topic, run.budget,
                use_profile=body.use_profile, parent=body.parent_session)
         return run.summary()
 

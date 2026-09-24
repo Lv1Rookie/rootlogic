@@ -28,6 +28,12 @@
           <option value="graph">Engine: LangGraph (resumable)</option>
         </select>
       </div>
+      <div class="row">
+        <label class="inline" title="Web searches each sub-agent may run">Searches
+          <input type="number" id="searches" min="1" max="20" value="4" style="width:64px"></label>
+        <label class="inline" title="Sub-agents researching at once. Use 1 for a local model: it is one server.">Parallel
+          <input type="number" id="parallel" min="1" max="8" value="2" style="width:64px"></label>
+      </div>
       <div class="row" style="justify-content:space-between">
         <label class="inline"><input type="checkbox" id="offline"> Offline demo</label>
         <button class="btn primary" type="submit">Research</button>
