@@ -175,6 +175,7 @@ h2 {
   font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
   color: var(--faint); margin: 0 0 9px; font-weight: 700;
 }
+aside > form > h2, aside > div:not(.brand) > h2 { padding-left: 31px; }   /* 24px marker + 7px gap */
 h2 + .meta { margin-top: -4px; }
 
 /* ---------------------------------------------------------------- folds
@@ -183,17 +184,17 @@ h2 + .meta { margin-top: -4px; }
  * - a reopened page shows both open rather than a stale collapsed state.
  */
 .fold > summary {
-  cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 7px;
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px;
   padding: 3px 0; border-radius: var(--r-sm); min-height: 26px;
 }
-/* everything is baselined except the marker, which centres on the row */
-.fold > summary .fold-mark { align-self: center; }
 .fold > summary::-webkit-details-marker { display: none; }
 /* The marker is the whole affordance - there is no other hint that a section folds - so it
  * is a real target rather than a typographic speck. It is drawn rather than typed: a glyph
  * like "▸" carries its own side bearings, so centring its box leaves the ink off-centre. */
 .fold-mark {
-  margin-left: auto; flex: none; width: 24px; height: 24px; padding: 4px;
+  /* leads the heading rather than floating off at the right margin, so the markers of every
+   * section line up in one column whatever their titles are called */
+  flex: none; width: 24px; height: 24px; padding: 4px;
   color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm);
   background: var(--panel-2); box-sizing: border-box;
   transition: transform .18s var(--ease), color .15s var(--ease), border-color .15s var(--ease);
