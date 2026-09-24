@@ -187,13 +187,19 @@ h2 + .meta { margin-top: -4px; }
   padding: 3px 0; border-radius: var(--r-sm);
 }
 .fold > summary::-webkit-details-marker { display: none; }
+/* The marker is the whole affordance - there is no other hint that a section folds - so it
+ * is a real target rather than a typographic speck. */
 .fold > summary::after {
-  content: "▸"; color: var(--faint); font-size: 11px; margin-left: auto;
-  transition: transform .18s var(--ease);
+  content: "▸"; color: var(--muted); font-size: 17px; line-height: 1; margin-left: auto;
+  width: 24px; height: 24px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel-2);
+  transition: transform .18s var(--ease), color .15s var(--ease), border-color .15s var(--ease);
 }
+.fold > summary:hover::after { color: var(--accent); border-color: var(--accent-line); }
 .fold[open] > summary::after { transform: rotate(90deg); }
 .fold > summary h2 { margin: 0; }
-.fold > summary:hover h2 { color: var(--muted); }
+.fold > summary:hover h2 { color: var(--ink-2); }
 .fold[open] > summary { margin-bottom: 7px; }
 .fold > :not(summary) { animation: fold-in .18s var(--ease) both; }
 @keyframes fold-in { from { opacity: 0; transform: translateY(-3px); } }
@@ -485,8 +491,10 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 }
 .prompt summary::-webkit-details-marker { display: none; }
 .prompt summary::before {
-  content: "▸"; color: var(--faint); font-size: 11px; transition: transform .15s var(--ease);
+  content: "▸"; color: var(--muted); font-size: 15px; line-height: 1; width: 14px;
+  flex: none; transition: transform .15s var(--ease), color .15s var(--ease);
 }
+.prompt summary:hover::before { color: var(--accent); }
 .prompt[open] summary::before { transform: rotate(90deg); }
 .prompt .pname { font-weight: 650; text-transform: capitalize; }
 .prompt textarea {
