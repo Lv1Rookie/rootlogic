@@ -519,3 +519,198 @@
               0 0 0 25px rgba(255, 255, 255, 0.05), 0 0 0 35px rgba(255, 255, 255, 0.05);
   background-color: rgba(255, 255, 255, 0.2);
 }
+
+/* ================================================================= glass buttons
+ * shokat_2650 · uiverse.io/shokat_2650/massive-snail-29
+ *
+ * As published this styles the bare `button` selector with `all: unset`, which would strip
+ * every other button on the page - the tabs, the history rows, the suggestion chips, and the
+ * four components above. It is scoped to `.btn` instead, the class the app's own buttons use.
+ *
+ * The glass is colourless by design: one white sheen over whatever sits behind. The variants
+ * keep their meaning by tinting that sheen and colouring the label, so Abort still reads red
+ * and Research still reads green, and each theme sets its own ink - dark text on a bright
+ * page, light text on a dark one, because a fixed rgba(50,50,50) is invisible on both.
+ */
+@property --uiv-angle-1 { syntax: "<angle>"; inherits: false; initial-value: -75deg; }
+@property --uiv-angle-2 { syntax: "<angle>"; inherits: false; initial-value: -45deg; }
+
+.uiv-btn-wrap {
+  --anim--hover-time: 400ms;
+  --anim--hover-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --uiv-btn-ink: rgba(50, 50, 50, 1);
+  --uiv-btn-tint: rgba(255, 255, 255, 0.2);
+  position: relative; z-index: 2; border-radius: 999vw;
+  background: transparent; pointer-events: none; display: inline-block;
+  transition: all var(--anim--hover-time) var(--anim--hover-ease);
+}
+/* a hidden button must take its wrapper and shadow with it */
+.uiv-btn-wrap:has(> .btn.hidden) { display: none; }
+
+.uiv-btn-shadow {
+  --shadow-cuttoff-fix: 2em;
+  position: absolute;
+  width: calc(100% + var(--shadow-cuttoff-fix)); height: calc(100% + var(--shadow-cuttoff-fix));
+  top: calc(0% - var(--shadow-cuttoff-fix) / 2); left: calc(0% - var(--shadow-cuttoff-fix) / 2);
+  filter: blur(clamp(2px, 0.125em, 12px));
+  overflow: visible; pointer-events: none;
+}
+.uiv-btn-shadow::after {
+  content: ""; position: absolute; z-index: 0; inset: 0; border-radius: 999vw;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.1));
+  width: calc(100% - var(--shadow-cuttoff-fix) - 0.25em);
+  height: calc(100% - var(--shadow-cuttoff-fix) - 0.25em);
+  top: calc(var(--shadow-cuttoff-fix) - 0.5em); left: calc(var(--shadow-cuttoff-fix) - 0.875em);
+  padding: 0.125em; box-sizing: border-box;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: all var(--anim--hover-time) var(--anim--hover-ease);
+  overflow: visible; opacity: 1;
+}
+
+.uiv-btn-wrap > .btn {
+  --border-width: clamp(1px, 0.0625em, 4px);
+  all: unset;
+  cursor: pointer; position: relative; display: block;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+  pointer-events: auto; z-index: 3;
+  background:
+    linear-gradient(-75deg, rgba(255,255,255,.05), var(--uiv-btn-tint), rgba(255,255,255,.05));
+  border-radius: 999vw;
+  box-shadow:
+    inset 0 0.125em 0.125em rgba(0, 0, 0, 0.05),
+    inset 0 -0.125em 0.125em rgba(255, 255, 255, 0.5),
+    0 0.25em 0.125em -0.125em rgba(0, 0, 0, 0.2),
+    0 0 0.1em 0.25em inset rgba(255, 255, 255, 0.2),
+    0 0 0 0 rgba(255, 255, 255, 1);
+  backdrop-filter: blur(clamp(1px, 0.125em, 4px));
+  -webkit-backdrop-filter: blur(clamp(1px, 0.125em, 4px));
+  transition: all var(--anim--hover-time) var(--anim--hover-ease);
+}
+.uiv-btn-wrap > .btn:hover {
+  transform: scale(0.975);
+  backdrop-filter: blur(0.01em); -webkit-backdrop-filter: blur(0.01em);
+  box-shadow:
+    inset 0 0.125em 0.125em rgba(0, 0, 0, 0.05),
+    inset 0 -0.125em 0.125em rgba(255, 255, 255, 0.5),
+    0 0.15em 0.05em -0.1em rgba(0, 0, 0, 0.25),
+    0 0 0.05em 0.1em inset rgba(255, 255, 255, 0.5),
+    0 0 0 0 rgba(255, 255, 255, 1);
+}
+.uiv-btn-wrap > .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.uiv-btn-wrap > .btn:disabled { cursor: not-allowed; opacity: .45; }
+
+.uiv-btn-wrap > .btn > span {
+  position: relative; display: block; user-select: none;
+  letter-spacing: -0.02em; font-weight: 500; font-size: 14px; white-space: nowrap;
+  color: var(--uiv-btn-ink);
+  -webkit-font-smoothing: antialiased;
+  text-shadow: 0em 0.25em 0.05em rgba(0, 0, 0, 0.1);
+  transition: all var(--anim--hover-time) var(--anim--hover-ease);
+  padding-inline: 1.25em; padding-block: 0.7em;
+}
+.uiv-btn-wrap > .btn:hover > span { text-shadow: 0.025em 0.025em 0.025em rgba(0, 0, 0, 0.12); }
+.uiv-btn-wrap > .btn.small > span { font-size: 13px; padding-inline: 1em; padding-block: 0.5em; }
+
+/* the travelling sheen */
+.uiv-btn-wrap > .btn > span::after {
+  content: ""; display: block; position: absolute; z-index: 3;
+  width: calc(100% - var(--border-width)); height: calc(100% - var(--border-width));
+  top: calc(0% + var(--border-width) / 2); left: calc(0% + var(--border-width) / 2);
+  box-sizing: border-box; border-radius: 999vw; overflow: clip;
+  background: linear-gradient(var(--uiv-angle-2),
+    rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.5) 40% 50%, rgba(255, 255, 255, 0) 55%);
+  mix-blend-mode: screen; pointer-events: none;
+  background-size: 200% 200%; background-position: 0% 50%; background-repeat: no-repeat;
+  transition:
+    background-position calc(var(--anim--hover-time) * 1.25) var(--anim--hover-ease),
+    --uiv-angle-2 calc(var(--anim--hover-time) * 1.25) var(--anim--hover-ease);
+}
+.uiv-btn-wrap > .btn:hover > span::after { background-position: 25% 50%; }
+.uiv-btn-wrap > .btn:active > span::after { background-position: 50% 15%; --uiv-angle-2: -15deg; }
+@media (hover: none) and (pointer: coarse) {
+  .uiv-btn-wrap > .btn > span::after,
+  .uiv-btn-wrap > .btn:active > span::after { --uiv-angle-2: -45deg; }
+}
+
+/* the rim */
+.uiv-btn-wrap > .btn::after {
+  content: ""; position: absolute; z-index: 1; inset: 0; border-radius: 999vw;
+  width: calc(100% + var(--border-width)); height: calc(100% + var(--border-width));
+  top: calc(0% - var(--border-width) / 2); left: calc(0% - var(--border-width) / 2);
+  padding: var(--border-width); box-sizing: border-box;
+  background:
+    conic-gradient(from var(--uiv-angle-1) at 50% 50%,
+      rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 5% 40%, rgba(0, 0, 0, 0.5) 50%,
+      rgba(0, 0, 0, 0) 60% 95%, rgba(0, 0, 0, 0.5)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.5));
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: all var(--anim--hover-time) var(--anim--hover-ease), --uiv-angle-1 500ms ease;
+  box-shadow: inset 0 0 0 calc(var(--border-width) / 2) rgba(255, 255, 255, 0.5);
+}
+.uiv-btn-wrap > .btn:hover::after { --uiv-angle-1: -125deg; }
+.uiv-btn-wrap > .btn:active::after { --uiv-angle-1: -75deg; }
+@media (hover: none) and (pointer: coarse) {
+  .uiv-btn-wrap > .btn::after,
+  .uiv-btn-wrap > .btn:hover::after,
+  .uiv-btn-wrap > .btn:active::after { --uiv-angle-1: -75deg; }
+}
+
+.uiv-btn-wrap:has(> .btn:hover) .uiv-btn-shadow {
+  filter: blur(clamp(2px, 0.0625em, 6px));
+  transition: filter var(--anim--hover-time) var(--anim--hover-ease);
+}
+.uiv-btn-wrap:has(> .btn:hover) .uiv-btn-shadow::after {
+  top: calc(var(--shadow-cuttoff-fix) - 0.875em); opacity: 1;
+}
+.uiv-btn-wrap:has(> .btn:active) { transform: rotate3d(1, 0, 0, 25deg); }
+.uiv-btn-wrap:has(> .btn:active) > .btn {
+  box-shadow:
+    inset 0 0.125em 0.125em rgba(0, 0, 0, 0.05),
+    inset 0 -0.125em 0.125em rgba(255, 255, 255, 0.5),
+    0 0.125em 0.125em -0.125em rgba(0, 0, 0, 0.2),
+    0 0 0.1em 0.25em inset rgba(255, 255, 255, 0.2),
+    0 0.225em 0.05em 0 rgba(0, 0, 0, 0.05),
+    0 0.25em 0 0 rgba(255, 255, 255, 0.75),
+    inset 0 0.25em 0.05em 0 rgba(0, 0, 0, 0.15);
+}
+.uiv-btn-wrap:has(> .btn:active) .uiv-btn-shadow { filter: blur(clamp(2px, 0.125em, 12px)); }
+.uiv-btn-wrap:has(> .btn:active) .uiv-btn-shadow::after {
+  top: calc(var(--shadow-cuttoff-fix) - 0.5em); opacity: 0.75;
+}
+.uiv-btn-wrap:has(> .btn:active) > .btn > span {
+  text-shadow: 0.025em 0.25em 0.05em rgba(0, 0, 0, 0.12);
+}
+
+/* ---- the colour coding the glass would otherwise lose
+ *
+ * The sheen is half-transparent white, so a tint has to be strong enough to survive it and
+ * the label has to be far enough from the tint to stay readable. A primary button carries
+ * the accent solidly and prints its label in the accent's own ink; a danger button stays a
+ * pale wash so that near-black red text reads against it. */
+.uiv-btn-wrap:has(> .btn.primary) {
+  --uiv-btn-tint: color-mix(in srgb, var(--accent) 92%, transparent);
+  --uiv-btn-ink: var(--accent-ink);
+}
+.uiv-btn-wrap:has(> .btn.primary) > .btn > span { font-weight: 650; text-shadow: none; }
+.uiv-btn-wrap:has(> .btn.danger) {
+  --uiv-btn-tint: color-mix(in srgb, var(--bad) 26%, rgba(255,255,255,.25));
+  --uiv-btn-ink: color-mix(in srgb, var(--bad) 62%, #000);
+}
+.uiv-btn-wrap:has(> .btn.danger) > .btn > span { font-weight: 600; text-shadow: none; }
+
+/* On a dark page the white sheen reads as frosted glass, so plain labels take the page ink
+ * and the danger label its own colour, which is already light there. */
+:root[data-theme="dark"] .uiv-btn-wrap { --uiv-btn-ink: var(--ink); }
+:root[data-theme="dark"] .uiv-btn-wrap:has(> .btn.danger) {
+  --uiv-btn-tint: color-mix(in srgb, var(--bad) 30%, transparent);
+  --uiv-btn-ink: #ffe9e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .uiv-btn-wrap { --uiv-btn-ink: var(--ink); }
+  :root:not([data-theme="light"]) .uiv-btn-wrap:has(> .btn.danger) {
+    --uiv-btn-tint: color-mix(in srgb, var(--bad) 30%, transparent);
+    --uiv-btn-ink: #ffe9e6;
+  }
+}
