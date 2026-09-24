@@ -8,6 +8,7 @@ import { $ } from "./dom.js";
 import { resetStages } from "./stages.js";
 import { resetAgents } from "./agents.js";
 import { resetSteer } from "./steer.js";
+import { clearReport } from "./export.js";
 
 export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "" };
 
@@ -40,7 +41,9 @@ export function resetView(topic) {
   resetAgents();
   resetSteer();
   $("#tab-log").innerHTML = "";
-  $("#tab-report").innerHTML = `<div class="empty">The report appears here when research finishes.</div>`;
+  $("#report-body").innerHTML =
+    `<div class="empty">The finished report appears here. Research in progress…</div>`;
+  clearReport();
   $("#tab-usage").innerHTML = `<div class="empty">Usage appears when the session ends.</div>`;
   $("#plan-rows").innerHTML = "";
   $("#plan-objective").textContent = "";

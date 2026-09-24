@@ -1,0 +1,99 @@
+/* Print layout: the report as a research paper, and nothing else on the page.
+ *
+ * Loaded with media="print", so it only applies when printing or saving to PDF. The browser
+ * renders real text rather than a rasterised image, so the PDF stays selectable, searchable
+ * and small.
+ */
+
+@page {
+  size: A4;
+  margin: 22mm 20mm 20mm;
+}
+
+/* Everything that isn't the report disappears: sidebar, tabs, controls, live views. */
+aside,
+.tabs,
+#stages,
+#agents,
+#steer,
+#steer-note-out,
+#plan-panel,
+#cards,
+#continue,
+#tab-log,
+#tab-usage,
+.report-actions,
+#welcome,
+.view-head .btn,
+#v-status {
+  display: none !important;
+}
+
+html, body {
+  background: #fff !important;
+  color: #000 !important;
+  font: 11pt/1.55 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+.layout, main, .panel, #view, #tab-report {
+  display: block !important;
+  grid-template-columns: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: #fff !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+  overflow: visible !important;
+  height: auto !important;
+}
+
+/* ---------------------------------------------------------------- title block */
+.print-title {
+  display: block !important;
+  text-align: center;
+  margin: 0 0 14mm;
+  padding-bottom: 6mm;
+  border-bottom: 0.4pt solid #000;
+}
+.print-title h1 { font-size: 20pt; line-height: 1.25; margin: 0 0 4mm; font-weight: 600; }
+.print-title .byline { font-size: 10pt; font-style: italic; }
+.print-title .meta { font-size: 8.5pt; color: #333; margin-top: 3mm; font-family: inherit; }
+
+/* ---------------------------------------------------------------- body copy */
+#report-body h1 { font-size: 17pt; margin: 0 0 6mm; }
+#report-body h2 {
+  font-size: 12.5pt; margin: 8mm 0 2.5mm; padding-bottom: 1mm;
+  border-bottom: 0.3pt solid #999; break-after: avoid;
+}
+#report-body h3 { font-size: 11pt; margin: 6mm 0 2mm; break-after: avoid; }
+#report-body p { margin: 0 0 3.2mm; text-align: justify; hyphens: auto; orphans: 3; widows: 3; }
+#report-body ul, #report-body ol { margin: 0 0 3.5mm 6mm; padding: 0; }
+#report-body li { margin-bottom: 1.4mm; }
+#report-body strong { font-weight: 600; }
+#report-body em { font-style: italic; }
+
+/* Citations and the claim table read as apparatus, not prose. */
+#report-body table {
+  width: 100%; border-collapse: collapse; font-size: 8.5pt; margin: 3mm 0 5mm;
+  break-inside: auto;
+}
+#report-body th, #report-body td {
+  border: 0.3pt solid #999; padding: 1.4mm 2mm; text-align: left; vertical-align: top;
+}
+#report-body th { background: #f0f0f0; font-weight: 600; }
+#report-body tr { break-inside: avoid; }
+
+/* The sources list is a bibliography: hanging indent, URLs shown in full. */
+#report-body h2 + ol { list-style-position: outside; }
+#report-body a { color: #000; text-decoration: none; }
+#report-body a::after { content: " (" attr(href) ")"; font-size: 7.5pt; color: #444; word-break: break-all; }
+
+#report-body blockquote {
+  margin: 3mm 0 3mm 5mm; padding-left: 4mm; border-left: 1pt solid #999;
+  font-size: 10pt; font-style: italic;
+}
+#report-body code, #report-body pre {
+  font-family: "SF Mono", Menlo, monospace; font-size: 8.5pt; background: #f4f4f4;
+}
+#report-body hr { border: 0; border-top: 0.3pt solid #999; margin: 6mm 0; }

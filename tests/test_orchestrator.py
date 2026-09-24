@@ -324,3 +324,18 @@ def test_skipping_a_task_names_it_in_the_event_data(tmp_path, kind):
     skips = [e for e in ui.events if e.type == "override.skip"]
     assert skips, [e.type for e in ui.events]
     assert skips[0].data.get("task") == "t2"
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_report_stage_says_where_the_report_will_appear(tmp_path, kind):
+    """"Writing report" left users watching a log with no idea where the output lands."""
+    from rootlogic.graph import ResearchGraph
+
+    store, ui = Store(), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(FakeLLM(), store, ui, **kw))
+    engine.run("impact of generative AI on newsrooms")
+
+    started = next(e for e in ui.events if e.type == "report.started")
+    assert started.message == "Writing the final report to the Result tab"

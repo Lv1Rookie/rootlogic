@@ -11,6 +11,7 @@ import { loadHistory } from "./history.js";
 import { loadProfile } from "./panels.js";
 import { trackStage } from "./stages.js";
 import { trackAgent } from "./agents.js";
+import { setReport } from "./export.js";
 
 export async function startRun(topic, parent = null) {
   const run = await api("/api/runs", {
@@ -46,7 +47,8 @@ export function handle(ev) {
       return;
     }
     case "report":
-      $("#tab-report").innerHTML = md(ev.markdown);
+      $("#report-body").innerHTML = md(ev.markdown);
+      setReport(ev.markdown, { topic: $("#v-topic").textContent, session: state.sid });
       showTab("report");
       return;
     case "run.error": return logEvent({ ...ev, type: "run.error" });

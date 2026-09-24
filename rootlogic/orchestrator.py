@@ -333,7 +333,7 @@ class Orchestrator:
         return analysis
 
     def _write(self, plan: Plan, analysis: Analysis) -> Report:
-        self._emit("report.started", "Writing report")
+        self._emit("report.started", "Writing the final report to the Result tab")
         sources = self._all_sources()
         prompt = (self._findings_block(plan)
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))

@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/print.css" media="print">
 <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
@@ -123,11 +124,17 @@
       <div class="panel">
         <div class="tabs">
           <button class="tab active" data-tab="log">Action log</button>
-          <button class="tab" data-tab="report">Report</button>
+          <button class="tab" data-tab="report">Result</button>
           <button class="tab" data-tab="usage">Usage</button>
         </div>
         <div id="tab-log" class="timeline"></div>
-        <div id="tab-report" class="report hidden"><div class="empty">The report appears here when research finishes.</div></div>
+        <div id="tab-report" class="report hidden">
+          <div class="row report-actions hidden" id="report-actions">
+            <button type="button" class="btn small" id="save-pdf">Download PDF</button>
+            <button type="button" class="btn small" id="save-md">Download Markdown</button>
+          </div>
+          <div id="report-body"><div class="empty">The finished report appears here. Research in progress…</div></div>
+        </div>
         <div id="tab-usage" class="hidden"><div class="empty">Usage appears when the session ends.</div></div>
       </div>
     </section>

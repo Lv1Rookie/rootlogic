@@ -424,7 +424,7 @@ class ResearchGraph:
         plan = Plan.model_validate(s["plan"])
         findings = self._findings(s)
         analysis = Analysis.model_validate(s["report"]["analysis"])
-        self._emit("report.started", "Writing report")
+        self._emit("report.started", "Writing the final report to the Result tab")
         prompt = (ctx.findings_block(plan, findings, s.get("context", []))
                   + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
         draft = self.llm.structured(purpose="report", system=self.prompts.writer, prompt=prompt,

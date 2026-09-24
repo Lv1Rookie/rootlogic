@@ -8,6 +8,7 @@ import { loadProfile, loadRules } from "./panels.js";
 import { loadPrompts } from "./prompts.js";
 import { startRun, follow } from "./run.js";
 import { steer } from "./steer.js";
+import { savePdf, saveMarkdown } from "./export.js";
 
 // --------------------------------------------------------------- tabs
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -49,6 +50,10 @@ $("#steer").onsubmit = e => {
   $("#steer-note").value = "";
   steer(...cmds);
 };
+
+// --------------------------------------------------------------- exporting the result
+$("#save-pdf").onclick = savePdf;
+$("#save-md").onclick = saveMarkdown;
 
 // --------------------------------------------------------------- settings forms
 $("#rule-add").onsubmit = async e => {
