@@ -127,6 +127,9 @@
 
       <div class="panel" id="progress-panel">
         <h2>Progress</h2>
+        <p class="meta hint">One card per sub-agent. Each is named for the sub-task it
+          researches — <code>t1</code>, <code>t2</code>, and so on — and the same name tags its
+          lines in the action log and its row in the plan.</p>
         <div id="stages" class="stages"></div>
         <div id="agents" class="agents hidden"></div>
         <form id="steer" class="row" style="margin-top:8px">
@@ -140,7 +143,7 @@
       <div class="panel" id="plan-panel">
         <h2>Plan</h2>
         <div id="plan-objective" class="meta"></div>
-        <table><thead><tr><th>id</th><th>Question</th><th>Status</th></tr></thead><tbody id="plan-rows"></tbody></table>
+        <table><thead><tr><th>Sub-agent</th><th>Question</th><th>Status</th></tr></thead><tbody id="plan-rows"></tbody></table>
       </div>
 
       <div class="panel">

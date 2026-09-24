@@ -178,6 +178,10 @@ h2 {
 h2 + .meta { margin-top: -4px; }
 /* one line under a heading saying what the section is for, for a reader seeing it first time */
 .hint { margin: -4px 0 8px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.hint code {
+  background: var(--code); padding: 0 4px; border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em;
+}
 
 /* ---------------------------------------------------------------- folds
  * Suggestions and History are lists that grow without limit, so they collapse. <details>
