@@ -536,3 +536,26 @@ def test_strict_mode_gives_up_after_one_repair():
     with pytest.raises(LLMError, match="did not match"):
         llm.structured(purpose="plan", system="s", prompt="p", schema=PlanDraft)
     assert len(api.calls) == 2
+
+
+def test_a_model_that_echoes_the_schema_is_told_so_by_name():
+    """Live failure on llama3.1: analyse returned the schema itself - $defs, properties,
+    required, title - because the prompt shows it a schema and says "match this". The repair
+    turn repeated the same schema, so the model echoed it again and the run died. The nudge
+    now names the fields wanted instead of showing the schema a second time."""
+    from rootlogic.openai_llm import json_schema
+
+    echo = json.dumps(json_schema(Clarification))          # the model parrots its instructions
+    llm, fake, _ = make([completion(echo), completion(json.dumps(CLARIFY))], strict=False)
+
+    got = llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert got.needs_clarification is False                # recovered on the repair turn
+
+    nudge = fake.calls[-1]["messages"][-1]["content"]
+    assert "schema" in nudge.lower()
+    for field in Clarification.model_fields:
+        assert field in nudge, f"the repair turn should name {field}"
+    # the error text may quote offending keys like $defs; what must not come back is the
+    # schema itself, which is what the model copied the first time
+    assert "matches this JSON Schema" not in nudge, "re-showing the schema caused the echo"
+    assert '"additionalProperties"' not in nudge

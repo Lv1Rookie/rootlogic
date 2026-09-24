@@ -238,6 +238,17 @@ class Store:
     def tasks(self, sid: str) -> list[dict[str, Any]]:
         return self._all("SELECT * FROM tasks WHERE session_id = ? ORDER BY rowid", (sid,))
 
+    def skip_tasks_absent_from(self, sid: str, keep: list[str]) -> None:
+        """Mark stored sub-tasks the approved plan no longer has as skipped.
+
+        Tasks are written when the plan is drafted, so a task the user drops at review already
+        has a row. Leaving it "pending" showed work in the plan table that would never happen.
+        """
+        marks = ",".join("?" * len(keep)) or "NULL"
+        self._exec(f"""UPDATE tasks SET status = 'skipped'
+                       WHERE session_id = ? AND status = 'pending' AND task_id NOT IN ({marks})""",
+                   (sid, *keep))
+
     def upsert_task(self, sid: str, task_id: str, question: str, status: str, origin: str,
                     finding_json: str | None = None) -> None:
         self._exec(

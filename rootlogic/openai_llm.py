@@ -147,8 +147,8 @@ class OpenAICompatibleLLM:
         """One more attempt, showing the model its own reply and what was wrong with it."""
         messages = [*messages,
                     {"role": "assistant", "content": message.content or ""},
-                    {"role": "user", "content": f"That was not valid: {error}. Reply with only "
-                                                f"the corrected JSON.{_json_instruction(schema)}"}]
+                    {"role": "user", "content": f"That was not valid: {error}. "
+                                                + _fix_instruction(schema, message.content)}]
         return _parse(purpose, schema, self._create(purpose, messages=messages).content)
 
     # ------------------------------------------------------------------ research subagent
@@ -357,6 +357,44 @@ def _assistant_turn(message) -> dict:
 def _json_instruction(schema: type[BaseModel]) -> str:
     return ("\n\nReply with ONLY a JSON object (no prose, no code fences) that matches this "
             f"JSON Schema:\n{json.dumps(json_schema(schema))}")
+
+
+SCHEMA_KEYS = {"$defs", "$schema", "properties", "required", "additionalProperties", "title"}
+
+
+def _echoed_the_schema(text: str | None) -> bool:
+    """Did the model hand back its instructions instead of an answer?
+
+    A weak model shown a JSON Schema and told to match it sometimes replies with the schema.
+    Seen live on llama3.1: analyse returned $defs, properties, required and title, and the
+    repair turn - which showed the schema a second time - produced the same reply again.
+    """
+    if not text:
+        return False
+    cleaned = text.strip().strip("`").removeprefix("json").strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end <= start:
+        return False
+    try:
+        payload = json.loads(cleaned[start:end + 1])
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and bool(SCHEMA_KEYS & payload.keys())
+
+
+def _fix_instruction(schema: type[BaseModel], reply: str | None) -> str:
+    """What to say on the repair turn.
+
+    For a schema echo, naming the fields is the one thing that cannot be echoed back; showing
+    the schema again is what caused the mistake. Otherwise the schema is still the clearest
+    statement of what is wanted.
+    """
+    if not _echoed_the_schema(reply):
+        return f"Reply with only the corrected JSON.{_json_instruction(schema)}"
+    fields = ", ".join(schema.model_fields)
+    return ("You replied with the JSON schema itself. Do not repeat the schema. Reply with "
+            "ONLY a JSON object holding the actual answer, whose top-level keys are exactly: "
+            f"{fields}.")
 
 
 def _parse(purpose: str, schema: type[T], text: str | None) -> T:

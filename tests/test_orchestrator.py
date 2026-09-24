@@ -454,3 +454,21 @@ def test_abort_is_noticed_even_when_every_sub_task_fails(tmp_path):
     # the wave had three sub-tasks and two retries each; abort must stop it, not outlast it
     assert len(calls) <= 3, f"kept working after abort: {len(calls)} research calls"
     assert ui.types().count("control.aborted") == 1   # one line, not one per thread
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_a_sub_task_dropped_at_review_is_not_left_pending(tmp_path, kind):
+    """Found while driving the web UI: dropping t3 from the plan worked - it never ran - but
+    its stored row stayed "pending", so the plan table showed work that would never happen."""
+    from rootlogic.graph import ResearchGraph
+
+    store = Store()
+    ui = ScriptedUI(edit=lambda plan: plan.subtasks.remove(plan.get("t3")))
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(FakeLLM(), store, ui, **kw))
+    engine.run("impact of generative AI on newsrooms")
+
+    rows = {t["task_id"]: t["status"] for t in store.tasks(engine.sid)}
+    assert rows["t3"] == "skipped", f"dropped task left as {rows['t3']!r}"
+    assert rows["t1"] == "done" and rows["t2"] == "done"

@@ -95,6 +95,7 @@ class Orchestrator:
             if reviewed is None:
                 raise Aborted("plan rejected")
             plan = reviewed
+            self.store.skip_tasks_absent_from(self.sid, [t.id for t in plan.subtasks])
             self._screen_user_tasks(plan)  # tasks the user typed into the plan
             self._emit("plan.approved", f"Plan approved: {continuity.describe_tasks(plan)}")
             self._save_plan(plan)

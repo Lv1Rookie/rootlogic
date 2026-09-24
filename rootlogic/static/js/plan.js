@@ -25,6 +25,13 @@ export function renderPlan() {
   }).join("");
 }
 
+/** Forget sub-tasks the user dropped at plan review, so the table shows what will run. */
+export function dropTasks(ids) {
+  for (const id of ids) delete state.tasks[id];
+  state.order = state.order.filter(id => !ids.includes(id));
+  renderPlan();
+}
+
 /** Read a task id out of an event message and move that task to its new status. */
 export function trackTask(ev) {
   const m = /^\[(t\d+)\]\s*(?:Added \([^)]*\): |Researching: )?(.*)$/.exec(ev.message || "");

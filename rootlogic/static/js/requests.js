@@ -6,7 +6,7 @@
 import { $, esc } from "./dom.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
-import { setPlan } from "./plan.js";
+import { setPlan, dropTasks } from "./plan.js";
 import { hasQueued, drain } from "./steer.js";
 
 function card(ev, title, bodyHTML) {
@@ -70,11 +70,17 @@ function reviewPlan(ev) {
   };
   addInput.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addTask(); } };
   $(".addbtn", el).onclick = addTask;
-  $(".approve", el).onclick = () => (addTask(), send(ev, {
-    approved: true, add: added, recency_days: parseInt($(".recency", el).value || "0", 10),
-    drop: [...el.querySelectorAll("tr")].filter(r => $("input", r) && !$("input", r).checked)
-                                        .map(r => r.dataset.id),
-  }));
+  $(".approve", el).onclick = () => {
+    addTask();
+    const drop = [...el.querySelectorAll("tr")].filter(r => $("input", r) && !$("input", r).checked)
+                                               .map(r => r.dataset.id);
+    // The plan table was drawn from the draft, so the dropped rows are still in it. The
+    // approved plan never comes back as an event, so prune them here rather than leaving
+    // sub-tasks on screen that will never run.
+    if (drop.length) dropTasks(drop);
+    send(ev, { approved: true, add: added, drop,
+               recency_days: parseInt($(".recency", el).value || "0", 10) });
+  };
   $(".reject", el).onclick = () => send(ev, { approved: false });
 }
 

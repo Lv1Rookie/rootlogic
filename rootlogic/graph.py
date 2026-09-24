@@ -270,6 +270,7 @@ class ResearchGraph:
             self._emit("session.aborted", "Aborted: plan rejected")
             return Command(goto=END, update={"status": "aborted"})
         plan = Plan.model_validate(decision["plan"])
+        self.store.skip_tasks_absent_from(self.sid, [t.id for t in plan.subtasks])
         for t in [t for t in plan.subtasks if t.origin == "user"]:
             if self.moderation.input_blocked(t.question, "added task"):
                 plan.subtasks.remove(t)
