@@ -220,7 +220,11 @@ class Orchestrator:
                     self._task_failed(t, str(e))
                     continue
                 self._accept_finding(plan, t, result)
+                # A sub-task boundary is the finest safe point there is: a model call in
+                # flight cannot be interrupted, but the next one need not start.
+                self._abort_if_requested()
         self._save_plan(plan)
+        self._checkpoint(plan)   # a pause pressed mid-wave is answered when the wave ends
 
     def _task_failed(self, task: SubTask, reason: str) -> None:
         """Retry a sub-task that found nothing: tool outages are usually transient, and a
@@ -405,7 +409,13 @@ class Orchestrator:
             else:
                 self._emit("user.skipped", f"User skipped: {q} (agent will use its judgment)")
 
+    def _abort_if_requested(self) -> None:
+        if self.control.aborting:
+            self._emit("control.aborted", "Aborted by user")
+            raise Aborted("stopped by user")
+
     def _checkpoint(self, plan: Plan) -> None:
+        self._abort_if_requested()
         if not self.control.consume_pause():
             return
         self._emit("control.paused", "Paused by user")

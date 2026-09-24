@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from rootlogic.control import Command
-from rootlogic.fake_llm import FakeLLM, default_plan
+from rootlogic.fake_llm import FakeLLM, default_finding, default_plan
 from rootlogic.llm import LLMError
 from rootlogic.models import (Clarification, FindingDraft, PlanDraft, Reflection, SubTaskDraft)
 from rootlogic.orchestrator import Budget, Orchestrator
@@ -339,3 +339,53 @@ def test_report_stage_says_where_the_report_will_appear(tmp_path, kind):
 
     started = next(e for e in ui.events if e.type == "report.started")
     assert started.message == "Writing the final report to the Result tab"
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_abort_stops_a_run_without_waiting_for_a_pause(tmp_path, kind):
+    """Reported from the UI: Pause appeared to do nothing and Abort was unreachable. Pause was
+    only checked once per wave - twenty minutes on a local model - and Abort lived inside the
+    override card, which only appears after a pause is honoured."""
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.models import FindingDraft
+
+    store, ui = Store(), ScriptedUI()
+    engine_holder = {}
+
+    def abort_midway(prompt):
+        engine_holder["e"].control.request_abort()      # user hits Abort during research
+        return default_finding(prompt, 1)
+
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(handlers={FindingDraft: abort_midway}), store, ui,
+                            checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else
+              Orchestrator(FakeLLM(handlers={FindingDraft: abort_midway}), store, ui, **kw))
+    engine_holder["e"] = engine
+
+    assert engine.run("impact of generative AI on newsrooms") is None
+    assert store.session(engine.sid)["status"] == "aborted"
+    assert "control.aborted" in ui.types()
+    assert "report.started" not in ui.types()           # it stopped, it didn't finish quietly
+
+
+def test_pause_is_noticed_between_sub_tasks_not_only_between_waves(tmp_path):
+    """A wave is minutes long; a sub-task is the finest safe point there is."""
+    store, ui = Store(), ScriptedUI(overrides=[[Command(action="stop")]])
+    holder = {}
+
+    def pause_midway(prompt):
+        holder["e"].control.request_pause()
+        return default_finding(prompt, 1)
+
+    from rootlogic.models import FindingDraft
+    engine = Orchestrator(FakeLLM(handlers={FindingDraft: pause_midway}), store, ui,
+                          reports_dir=tmp_path, today=TODAY)
+    holder["e"] = engine
+    engine.run("impact of generative AI on newsrooms")
+
+    types = ui.types()
+    assert "control.paused" in types
+    # the pause landed while the wave was still running, so not every task started
+    started = [e for e in ui.events if e.type == "task.started"]
+    assert len(started) == 3 and types.index("control.paused") < len(types) - 1

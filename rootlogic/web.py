@@ -323,6 +323,18 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
                                                           "next checkpoint"})
         return {"ok": True}
 
+    @app.post("/api/runs/{run_id}/abort")
+    def abort(run_id: str) -> dict:
+        """Stop a run outright. Unlike Abort inside the override card, this needs no pause
+        to have been honoured first - a run stuck in a long model call can still be ended."""
+        run = get_run(run_id)
+        if run.finished:
+            raise HTTPException(409, "Run already finished")
+        run.engine.control.request_abort()
+        run.push({"type": "control.requested", "message": "Abort requested — stopping at the "
+                                                          "next sub-task boundary"})
+        return {"ok": True}
+
     # ------------------------------------------------------------- sessions (history)
     @app.get("/api/sessions")
     def sessions() -> dict:

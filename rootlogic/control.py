@@ -40,11 +40,18 @@ class Interaction(Protocol):
 
 
 class Control:
-    """Thread-safe pause flag. A UI sets it (Ctrl-C, a Pause button); the orchestrator
-    checks it at safe points between waves and hands control to ``Interaction.override``."""
+    """Thread-safe pause and abort flags, set by a UI (Ctrl-C, a button) and read by the
+    engines at safe points.
+
+    Pause hands control to ``Interaction.override``; abort ends the run. Neither can
+    interrupt a model call that is already in flight, so the finest granularity either can
+    have is one sub-task: a wave of sub-agents runs for minutes, and checking only between
+    waves made Pause look broken and left Abort unreachable behind it.
+    """
 
     def __init__(self) -> None:
         self._pause = threading.Event()
+        self._abort = threading.Event()
 
     def request_pause(self) -> None:
         self._pause.set()
@@ -60,8 +67,17 @@ class Control:
     def pause_pending(self) -> bool:
         return self._pause.is_set()
 
+    def request_abort(self) -> None:
+        """End the run at the next safe point, without waiting for a pause to be answered."""
+        self._abort.set()
+
+    @property
+    def aborting(self) -> bool:
+        return self._abort.is_set()
+
     def clear(self) -> None:
         self._pause.clear()
+        self._abort.clear()
 
 
 def step_event(task_id: str, step: Step) -> tuple[str, str, dict]:

@@ -21,7 +21,11 @@ export function setStatus(s) {
   const p = $("#v-status");
   p.className = "pill " + s;
   p.textContent = s;
-  $("#pause").classList.toggle("hidden", s !== "running" || !state.run);
+  const live = s === "running" && !!state.run;
+  $("#pause").classList.toggle("hidden", !live);
+  // Abort used to live only inside the override card, which appears after a pause is
+  // honoured - so a run that would not pause could not be stopped at all.
+  $("#abort").classList.toggle("hidden", !live);
 }
 
 export function showTab(name) {

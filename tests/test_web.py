@@ -392,3 +392,18 @@ def test_retry_refuses_a_live_session_and_an_unknown_one(client):
     s = wait(client, rid, pending("plan"))
     assert client.post(f"/api/sessions/{s['session_id']}/retry", json={}).status_code == 409
     assert client.post("/api/sessions/nope/retry", json={}).status_code == 404
+
+
+def test_abort_stops_a_run_without_an_override_card(client):
+    """Reported from the UI: Abort only existed inside the override card, so a run that
+    would not pause could not be stopped."""
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    assert client.post(f"/api/runs/{rid}/abort").status_code == 200
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    s = wait(client, rid, finished)
+    assert s["status"] == "aborted"
+    types = [e["type"] for e in sse_events(client, rid)]
+    assert "control.aborted" in types and "report.started" not in types
+    assert client.post(f"/api/runs/{rid}/abort").status_code == 409   # already finished

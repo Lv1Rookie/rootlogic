@@ -279,9 +279,19 @@ class ResearchGraph:
         self.store.update_session(self.sid, plan_json=plan.model_dump_json())
         return Command(goto="dispatch", update={"plan": decision["plan"]})
 
+    def _aborted(self, plan: Plan) -> dict:
+        """End the run now, without waiting for a pause to be answered."""
+        self.store.update_session(self.sid, status="aborted")
+        self._emit("control.aborted", "Aborted by user")
+        self._emit("session.aborted", "Aborted: stopped by user")
+        return {"status": "aborted", "stop": True, "wave": [], "plan": plan.model_dump()}
+
     def dispatch(self, s: ResearchState) -> dict:
         plan = Plan.model_validate(s["plan"])
         update: dict[str, Any] = {}
+
+        if self.control.aborting:
+            return self._aborted(plan)
 
         if self.control.pause_pending():
             commands = interrupt({"kind": "override", "plan": s["plan"]})
@@ -310,6 +320,9 @@ class ResearchGraph:
     def research(self, payload: dict) -> dict:
         """A research sub-agent. Receives only its own slice of state (via Send)."""
         task = SubTask.model_validate(payload["task"])
+        # A model call in flight cannot be interrupted, but the next one need not start.
+        if self.control.aborting:
+            return {"raw": []}
         plan = Plan.model_validate(payload["plan"])
         deps = [Finding.model_validate(d) for d in payload["deps"]]
         prompt = ctx.research_prompt(plan, task, self.today, payload["context"], deps)

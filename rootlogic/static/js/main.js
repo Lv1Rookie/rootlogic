@@ -82,6 +82,11 @@ $("#pref-add").onsubmit = async e => {
 $("#pause").onclick = () =>
   api(`/api/runs/${state.run}/pause`, { method: "POST" }).catch(e => alert(e.message));
 
+$("#abort").onclick = () => {
+  if (!confirm("Stop this run? Work already finished is kept, but no further research runs.")) return;
+  api(`/api/runs/${state.run}/abort`, { method: "POST" }).catch(e => alert(e.message));
+};
+
 $("#resume").onclick = async () => {
   const sid = state.sid, topic = $("#v-topic").textContent;
   try {
