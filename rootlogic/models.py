@@ -315,7 +315,9 @@ class Report(BaseModel):
 
     def to_markdown(self) -> str:
         d = self.draft
-        lines = [f"# {d.title}", "", "## Executive summary", "", d.executive_summary, "",
+        # "Executive summary" belongs to a boardroom. The same paragraph serves a student, a
+        # journalist and a clinician, and "In short" asks nothing of any of them.
+        lines = [f"# {d.title}", "", "## In short", "", d.executive_summary, "",
                  "## Key takeaways", ""]
         lines += [f"- {t}" for t in d.key_takeaways]
         lines += ["", d.body_markdown, ""]

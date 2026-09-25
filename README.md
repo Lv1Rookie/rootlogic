@@ -370,6 +370,10 @@ rootlogic uses what you tell it, not just what it searches:
   it hands you a plan to edit and the plan is not stable until the wave rewriting it finishes;
   Abort has no plan to offer, so it lands within one in-flight model call. None of the three can
   interrupt a request already sent to the model — one sub-task is the floor for all of them.
+- **Download** the finished report as `.pdf` or `.md`. The PDF is rendered server-side and
+  served as a file, so both open the browser's ordinary Save panel; printing to PDF sent the
+  reader into a printer menu instead. Needs `pip install -e '.[pdf]'` — without it the button
+  falls back to the print dialog rather than failing.
 - **Watch** the live action log and plan status, then read the rendered report and per-step token/cost table.
 - **History:** reopen any past session. Sessions left `interrupted` by a server restart can be **resumed** (graph engine).
 

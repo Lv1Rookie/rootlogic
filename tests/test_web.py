@@ -528,3 +528,37 @@ def test_the_sidebar_can_be_hidden_and_the_page_can_be_jumped_around():
     assert "#report-body" in js and "h1, h2" in js, \
         "the report's own headings belong in the jump menu"
     assert '"#statusbar"' not in js, "the menu lives in the status bar, so it is never lost"
+
+
+def test_the_pdf_downloads_as_a_file_rather_than_opening_a_printer(client, tmp_path):
+    """Downloading the Markdown opened the Save panel; the PDF opened the print dialog,
+    pointing at whatever printer was last used. Two buttons that both say download should not
+    behave that differently, so the PDF is rendered here and served as an attachment."""
+    run = client.post("/api/runs", json={"topic": TOPIC}).json()
+    s = wait(client, run["run_id"], pending("plan"))
+    client.post(f"/api/runs/{run['run_id']}/answer",
+                json={"request_id": s["pending"]["request_id"], "answer": {"approved": True}})
+    sid = wait(client, run["run_id"], finished)["session_id"]
+
+    r = client.get(f"/api/sessions/{sid}/report.pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.headers["content-disposition"].startswith("attachment; filename=")
+    assert r.content[:5] == b"%PDF-", "a real PDF, not an error page"
+    assert len(r.content) > 1000
+
+    assert client.get("/api/pdf-support").json()["available"] is True
+    assert client.get("/api/sessions/nosuch/report.pdf").status_code == 404
+
+
+def test_the_report_summary_heading_is_not_boardroom_english():
+    """"Executive summary" addresses a boardroom. The same paragraph serves a student, a
+    journalist and a clinician."""
+    from rootlogic.models import Analysis, Report, ReportDraft
+
+    draft = ReportDraft(title="T", executive_summary="S", key_takeaways=[], body_markdown="",
+                        open_questions=[], related_topics=[])
+    text = Report(session_id="x", draft=draft, sources=[],
+                  analysis=Analysis(consensus=[], contradictions=[])).to_markdown()
+    assert "## In short" in text
+    assert "Executive summary" not in text

@@ -51,7 +51,26 @@ function reportTitle() {
   return (heading || meta.topic || state.topic || "Research report").replace(/\s+/g, " ");
 }
 
-export function savePdf() {
+/** Ask the server for the PDF, so the browser offers to save a file like it does for .md. */
+export async function savePdf() {
+  if (!markdown || !meta.session) return;
+  try {
+    const support = await (await fetch("/api/pdf-support")).json();
+    if (support.available) {
+      // A plain link, so the browser's own Save panel opens - the same one .md gets.
+      const a = Object.assign(document.createElement("a"), {
+        href: `/api/sessions/${encodeURIComponent(meta.session)}/report.pdf`, download: "",
+      });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+  } catch { /* server unreachable: fall through to the print engine */ }
+  printPdf();   // the 'pdf' extra is not installed, so the browser renders it instead
+}
+
+function printPdf() {
   if (!markdown) return;
   addTitleBlock();
   // The browser takes the PDF's title, and the name it offers to save under, from the

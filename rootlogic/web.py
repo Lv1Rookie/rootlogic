@@ -26,13 +26,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .backend import Backend, BackendError
 from .control import Command, Event
+from . import pdf
 from .filters import clean_domain
+from .orchestrator import _slug
 from .models import Plan, SubTaskDraft
 from .orchestrator import Budget
 from .prompts import DEFAULTS as prompt_defaults, EDITABLE
@@ -397,6 +399,39 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         return {"session": s, "events": store.events(sid), "messages": store.messages(sid),
                 "sources": store.sources(sid), "usage": store.usage(sid),
                 "usage_by_purpose": store.usage_by_purpose(sid), "report": report}
+
+    @app.get("/api/sessions/{sid}/report.pdf")
+    def report_pdf(sid: str):
+        """The report as a file the browser saves, rather than a print dialog to navigate.
+
+        Downloading the Markdown opens the ordinary Save panel; the PDF used to open the
+        printer menu, because the browser's print engine was doing the rendering. Two buttons
+        that both say download now behave the same way.
+        """
+        session = store.session(sid)
+        if not session:
+            raise HTTPException(404, "Unknown session")
+        path = Path(session["report_path"] or "")
+        if not session["report_path"] or not path.exists():
+            raise HTTPException(404, "This session has no report")
+        if not pdf.available():
+            # The UI asks first and falls back to printing, so this is for direct callers.
+            raise HTTPException(501, "PDF rendering needs the 'pdf' extra: "
+                                     "pip install -e '.[pdf]'")
+        text = path.read_text()
+        title = text.split("\n", 1)[0].lstrip("# ").strip() or session["topic"]
+        try:
+            body = pdf.render(text, title=title, session=sid)
+        except pdf.PdfUnavailable as e:
+            raise HTTPException(500, str(e)) from e
+        return Response(body, media_type="application/pdf", headers={
+            "Content-Disposition": f'attachment; filename="{_slug(title)}.pdf"',
+            "Cache-Control": "no-store"})
+
+    @app.get("/api/pdf-support", include_in_schema=False)
+    def pdf_support() -> dict:
+        """So the UI can fall back to the print dialog rather than offering a dead button."""
+        return {"available": pdf.available()}
 
     @app.post("/api/sessions/{sid}/retry")
     def retry(sid: str, body: ResumeRun) -> dict:
