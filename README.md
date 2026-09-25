@@ -50,7 +50,7 @@ If you are here to assess the project rather than use it, this is the shortest h
      with checkpointing and resume.
 4. **What it gets wrong, and how that is known:**
    [`docs/walkthrough.md`](docs/walkthrough.md) is the build log — every defect live testing
-   found that the 324 mocked tests could not, and what each one changed. The section on the run
+   found that the 337 mocked tests could not, and what each one changed. The section on the run
    controls and the one on where a sub-agent's sources come from are the two worth reading.
 
 `pytest` runs the whole suite in about 15 seconds and touches no network.
@@ -102,7 +102,7 @@ rootlogic log <session>      # full action log + conversation
 rootlogic usage <session>    # tokens, web searches and cost per step
 rootlogic show <session>     # re-print the report
 rootlogic forget <session>   # delete a session and its memory
-pytest                       # 324 tests, no network
+pytest                       # 337 tests, no network
 ```
 
 Running it through a gateway onto a Claude subscription — the fastest setup in practice, and

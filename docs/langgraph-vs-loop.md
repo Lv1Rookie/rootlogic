@@ -4,7 +4,7 @@ rootlogic ships the same research agent twice so the trade-off can be seen in co
 
 | | `--engine loop` (default) | `--engine graph` |
 |---|---|---|
-| File | [`rootlogic/orchestrator.py`](../rootlogic/orchestrator.py) (~420 lines) | [`rootlogic/graph.py`](../rootlogic/graph.py) (~580 lines) |
+| File | [`rootlogic/orchestrator.py`](../rootlogic/orchestrator.py) (~680 lines) | [`rootlogic/graph.py`](../rootlogic/graph.py) (~780 lines) |
 | Control flow | A Python `while` loop calling stage methods | A `StateGraph`: 12 nodes plus conditional edges |
 | Parallel sub-agents | `ThreadPoolExecutor` | `Send("research", …)` fan-out, merged by a state reducer |
 | Human decisions | `ui.ask()` / `ui.review_plan()` block the loop | `interrupt()`: a persisted pause that the runner answers with `Command(resume=…)` |
