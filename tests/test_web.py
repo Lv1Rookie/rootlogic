@@ -525,9 +525,11 @@ def test_the_sidebar_can_be_hidden_and_the_page_can_be_jumped_around():
         "the sidebar is a column at every width, never a sheet over the page"
 
     js = (static / "js" / "outline.js").read_text()
-    assert "#report-body" in js and "h1, h2" in js, \
-        "the report's own headings belong in the jump menu"
+    # The menu moves around the page, so it lists panels and nothing else: the report's own
+    # headings buried the handful of entries it exists for under the paper's contents page.
+    assert "h1, h2" not in js, "the report's headings are not page navigation"
     assert '"#statusbar"' not in js, "the menu lives in the status bar, so it is never lost"
+    assert '"#result-panel"' in js, "the report is reached as a panel, as a whole"
 
 
 def test_the_pdf_downloads_as_a_file_rather_than_opening_a_printer(client, tmp_path):

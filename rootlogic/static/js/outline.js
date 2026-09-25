@@ -1,4 +1,4 @@
-// "Jump to…": the panels of the page, and the report's own headings.
+// "Jump to…": the panels of the page.
 //
 // A finished report is long, and the panels above and below it - the plan, the progress
 // cards, the follow-up box - end up separated by screenfuls of prose. This lists what is on
@@ -29,12 +29,9 @@ export function refreshOutline() {
     if (visible($(sel))) options.push([sel, label]);
   }
 
-  // The report's own sections, indented under it, so a long paper is navigable by heading.
-  $("#report-body")?.querySelectorAll("h1, h2").forEach((h, i) => {
-    if (!h.id) h.id = `report-h-${i}`;
-    const text = h.textContent.trim();
-    if (text) options.push([`#${h.id}`, (h.tagName === "H1" ? "  " : "    ") + text]);
-  });
+  // Not the report's own headings. This menu moves around the page - the panels above and
+  // below the report - and filling it with the paper's table of contents buried the six
+  // entries it exists for under sixteen that belong to the document being read.
 
   menu.innerHTML = `<option value="">Jump to…</option>` +
     options.map(([v, t]) => `<option value="${v}">${t.replace(/</g, "&lt;")}</option>`).join("");
