@@ -33,7 +33,14 @@ from .tracing import traced_sink, tracer_from_env
 console = Console()
 # Brackets are Rich style tags, so the letters must be escaped or they vanish from the prompt.
 PLAN_PROMPT = r"[bold]Plan[/] — \[a]pprove, \[e]dit, \[q]uit"
-HOME = Path(os.environ.get("ROOTLOGIC_HOME", ".rootlogic"))
+def data_home() -> Path:
+    """Where sessions, reports and checkpoints live.
+
+    Read when asked rather than at import: a ``.env`` is loaded once ``main`` runs, which is
+    after this module is imported, and ``ROOTLOGIC_HOME`` set there has to count. As a module
+    constant it silently did not - the file said one directory and the run used another.
+    """
+    return Path(os.environ.get("ROOTLOGIC_HOME", ".rootlogic"))
 
 STYLE = {
     "session": "bold cyan", "memory": "magenta", "clarify": "yellow", "plan": "cyan",
@@ -153,7 +160,7 @@ def show_plan(plan: Plan) -> None:
 
 
 def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = False,
-                  budget: Budget | None = None, home: Path = HOME,
+                  budget: Budget | None = None, home: Path | None = None,
                   backend: Backend | None = None, use_profile: bool = True,
                   source_policy: SourcePolicy | None = None,
                   prompt_set: PromptSet | None = None):
@@ -161,6 +168,7 @@ def create_engine(store: Store, ui, *, engine: str = "loop", offline: bool = Fal
 
     Both engines expose .run(topic), .control and .sid; the graph engine adds .resume(sid).
     """
+    home = home or data_home()
     budget = budget or Budget()
     # Prompt edits are a stored setting, like the profile and the source rules: a run picks
     # them up unless the caller passes an explicit set.
@@ -285,7 +293,7 @@ def cmd_web(args: argparse.Namespace, store: Store) -> int:
     console.print(f"rootlogic web UI → http://{args.host}:{args.port}  (Ctrl-C to stop)")
     backend = backend_from_args(args).validate()
     console.print(f"[dim]Model: {backend.label}[/]")
-    serve(args.db, HOME, host=args.host, port=args.port, backend=backend)
+    serve(args.db, data_home(), host=args.host, port=args.port, backend=backend)
     return 0
 
 
@@ -531,9 +539,36 @@ def backend_from_args(args: argparse.Namespace) -> Backend:
                    stream=getattr(args, "stream", False))
 
 
+def load_env_file(path: Path | None = None) -> list[str]:
+    """Read ``.env`` from the working directory into the environment, and say what it set.
+
+    A real export always wins (``override=False``): a file that silently beat
+    ``TAVILY_API_KEY=... rootlogic research`` would be a nasty surprise, and the shell is
+    the more explicit of the two. Optional dependency, wrapped like the tracer - a malformed
+    file or a missing package must not stop a run that had its variables exported anyway.
+    """
+    env_file = path or Path(".env")
+    if not env_file.is_file():
+        return []
+    try:
+        from dotenv import dotenv_values, load_dotenv
+    except ImportError:
+        console.print("[yellow]Found .env but python-dotenv is not installed[/] — "
+                      "`pip install -e '.[env]'`, or export the variables yourself.")
+        return []
+    try:
+        named = [k for k, v in dotenv_values(env_file).items() if v is not None]
+        load_dotenv(env_file, override=False)
+    except Exception as e:  # noqa: BLE001 - a broken file is not worth ending a run over
+        console.print(f"[yellow]Could not read {env_file}:[/] {e}")
+        return []
+    return [k for k in named if os.environ.get(k)]
+
+
 def main(argv: list[str] | None = None) -> int:
+    load_env_file()
     p = argparse.ArgumentParser(prog="rootlogic", description="Agentic personal research assistant")
-    p.add_argument("--db", default=str(HOME / "rootlogic.db"))
+    p.add_argument("--db", default=str(data_home() / "rootlogic.db"))
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("research", help="research a topic")

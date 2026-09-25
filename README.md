@@ -87,6 +87,8 @@ rootlogic research --offline -y "any topic"      # no API key needed: determinis
 export ANTHROPIC_API_KEY=sk-ant-...              # or `ant auth login`
 rootlogic research "your topic"                  # live: Claude + web search
 
+cp .env.example .env                             # or keep the keys in a file instead
+
 rootlogic web                                    # web UI at http://127.0.0.1:8000
 rootlogic research --engine graph "topic"       # LangGraph engine (resumable)
 rootlogic resume <session>   # continue a graph session after a crash / quit
@@ -147,6 +149,15 @@ calls and burn most of the tokens (330k of 636k in one live run), so this is the
 lever: `--model claude-opus-5 --worker-model claude-haiku-4-5`. `rootlogic usage` shows the
 per-model split, and `--worker-prices IN,OUT` prices a non-Claude worker.
 Data lives in `./.rootlogic/` (override with `ROOTLOGIC_HOME`).
+
+### Keys in a file instead of a shell
+
+`.env` in the working directory is read at startup with `pip install -e '.[env]'`, and
+[`.env.example`](.env.example) lists every variable the app reads and what each one is for.
+An exported variable always wins, so `TAVILY_API_KEY=… rootlogic research …` still means what
+it says. The file is gitignored, and a running server keeps the environment it started with —
+restart it after editing. Exporting the variables yourself works exactly as before; nothing
+requires the file, and the extra is optional.
 
 ## How it maps to the assignment
 
