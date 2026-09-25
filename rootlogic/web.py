@@ -204,7 +204,7 @@ class StartRun(BaseModel):
     max_tasks: int = Field(10, ge=1, le=20)
     parent_session: str | None = None   # follow up on this earlier session
     use_profile: bool = True
-    verify_claims: int = Field(12, ge=0, le=40)  # 0 disables claim verification
+    verify_claims: int = Field(30, ge=0, le=120)  # 0 disables claim verification
     # A local model is one server: many searches and parallel sub-agents starve it, while a
     # hosted API benefits from both. The CLI has always exposed these; the UI needs them too.
     max_searches: int = Field(8, ge=1, le=20)    # web searches per sub-agent

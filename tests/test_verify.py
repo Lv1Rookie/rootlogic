@@ -13,8 +13,8 @@ from rootlogic.models import (CheckedClaim, ClaimDraft, ClaimVerdictDraft, Credi
                               FindingDraft,
                               Plan, ReportDraft, SearchHit, SourceDraft, VerificationDraft)
 from rootlogic.store import Store
-from rootlogic.verify import (check_report, corroborate, evidence_from_hits, quote_in,
-                              registrable_domain, relevant_excerpt, verify_findings)
+from rootlogic.verify import (FETCH_FLOOR, check_report, corroborate, evidence_from_hits,
+                              quote_in, registrable_domain, relevant_excerpt, verify_findings)
 
 TODAY = date(2026, 9, 22)
 
@@ -550,3 +550,25 @@ def test_a_claim_whose_only_figure_is_a_year_still_checks_that_year():
 
     assert _missing_figures("The telescope launched in 2021", "it launched in 2019") == {"2021"}
     assert _missing_figures("The telescope launched in 2021", "it launched in 2021") == set()
+
+
+def test_fetch_budget_follows_the_claim_budget():
+    """A claim whose page was never fetched scores unverifiable, so a bigger claim budget
+    against a fixed six fetches would just make a bigger pile of unverifiable claims."""
+    claims = [(f"Claim {i}", [f"https://a.gov/{i}"]) for i in range(20)]
+    f = finding("t1", claims, [src(f"https://a.gov/{i}") for i in range(20)])
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        return PAGE
+
+    llm = FakeLLM(handlers=verdicts(*[(i + 1, "supported", "Unemployment fell to 3.9 percent "
+                                       "in 2025") for i in range(20)]))
+    verify_findings([f], llm=llm, evidence={}, fetch=fetch, max_claims=20)
+    assert len(fetched) == 10                       # half the claim budget, not six
+
+    fetched.clear()
+    verify_findings([finding("t2", claims, [src(f"https://a.gov/{i}") for i in range(20)])],
+                    llm=llm, evidence={}, fetch=fetch, max_claims=8)
+    assert len(fetched) == FETCH_FLOOR              # small budgets keep the floor, not half

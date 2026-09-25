@@ -45,7 +45,12 @@ class Budget:
     max_tasks: int = 10        # hard cap on sub-tasks per session
     max_parallel: int = 4      # concurrent research sub-agents
     max_searches: int = 8      # web searches per sub-agent
-    verify_claims: int = 12    # claims checked against their cited pages (0 = no verification)
+    verify_claims: int = 30    # claims checked against their cited pages (0 = no verification)
+    # 12 was a whole run's worth when a plan had three sub-tasks. A nine-sub-task run makes
+    # sixty-odd claims, and checking twelve of them left a report whose quality numbers
+    # covered a slice the reader had no way to see. Cost is mild: the verifier batches a
+    # finding's claims into one call, so more claims per finding is a bigger prompt, not
+    # more calls.
     max_retries: int = 1       # re-runs of a sub-task that found nothing (tool errors happen)
 
 

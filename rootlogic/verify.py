@@ -31,6 +31,7 @@ from .models import (CheckedClaim, Finding, ReportDraft, ReportQuality, SearchHi
                      VerificationDraft)
 
 MIN_EVIDENCE = 200          # less text than this is navigation/boilerplate, not page content
+FETCH_FLOOR = 6             # pages fetched for evidence, even on a tiny claim budget
 CHUNK = 1500                # characters per evidence chunk
 CHUNKS_PER_SOURCE = 3       # most relevant chunks shown per cited page
 SOURCES_PER_CLAIM = 3
@@ -163,11 +164,20 @@ def page_fetcher(search: SearchProvider | None) -> Fetch | None:
 
 
 def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, str],
-                    fetch: Fetch | None = None, max_claims: int = 12, max_fetches: int = 6,
+                    fetch: Fetch | None = None, max_claims: int = 30,
+                    max_fetches: int | None = None,
                     emit: Emit | None = None, verifier: str = prompts.VERIFIER) -> VerifyResult:
     """Fill ``finding.checks`` for every finding that hasn't been checked yet (earlier
-    sessions' findings arrive already checked). Mutates ``evidence`` with pages it fetches."""
+    sessions' findings arrive already checked). Mutates ``evidence`` with pages it fetches.
+
+    ``max_fetches`` defaults to half the claim budget: a claim whose page was never fetched
+    is scored ``unverifiable`` for want of evidence, so a fixed six fetches would have turned
+    a larger claim budget into a larger pile of unverifiable claims. Most cited pages are
+    already in ``evidence`` from the research itself - the fetches are for the rest.
+    """
     emit = emit or (lambda *a, **k: None)
+    if max_fetches is None:
+        max_fetches = max(FETCH_FLOOR, max_claims // 2)
     result = VerifyResult()
     sources = {normalize_url(s.url): s for f in findings for s in f.sources}
     pending = [f for f in findings if not f.checks]

@@ -102,7 +102,8 @@ tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in w
 `TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
 `--no-profile` skips reading and learning your standing preferences for one run.
 `--block DOMAIN` / `--only DOMAIN` (repeatable) apply source rules to one run.
-`--verify-claims N` sets how many claims are checked against their pages (default 12), and
+`--verify-claims N` sets how many claims are checked against their pages (default 30,
+spread round-robin so every sub-task gets some checked), and
 `--no-verify` turns checking off.
 `--worker-model MODEL` runs the research sub-agents on a cheaper model while planning,
 reflection, analysis, verification and writing stay on `--model`. Sub-agents make most of the

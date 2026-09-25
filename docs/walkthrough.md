@@ -664,7 +664,7 @@ facts. The machinery is sound either way; the judgement is only as good as the m
    export TAVILY_API_KEY=tvly-...               # free tier is plenty
    rootlogic research --provider openai --base-url http://localhost:20128/v1 \
        --model qwen3:8b --reasoning-effort none --search tavily --moderation none \
-       --searches 2 --verify-claims 12 "a topic you know well"
+       --searches 2 --verify-claims 12 "a topic you know well"   # 12, not the default 30: a local model is slow
    ```
 
    For the best output, Claude instead — one env var, and it keeps hosted web search, prompt

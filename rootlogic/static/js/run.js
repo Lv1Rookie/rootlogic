@@ -20,7 +20,7 @@ export async function startRun(topic, parent = null) {
     body: {
       topic, engine: $("#engine").value, offline: $("#offline").checked,
       use_profile: $("#use-profile").checked, parent_session: parent,
-      verify_claims: $("#verify").checked ? 12 : 0,
+      verify_claims: $("#verify").checked ? 30 : 0,
       max_searches: parseInt($("#searches").value || "4", 10),
       max_parallel: parseInt($("#parallel").value || "2", 10),
     },

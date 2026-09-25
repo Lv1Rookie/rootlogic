@@ -210,7 +210,7 @@ def build_engine(args: argparse.Namespace, store: Store, engine: str):
     budget = Budget(max_rounds=args.rounds, max_tasks=args.max_tasks,
                     max_parallel=args.parallel, max_searches=args.searches,
                     verify_claims=0 if getattr(args, "no_verify", False)
-                    else getattr(args, "verify_claims", 12))
+                    else getattr(args, "verify_claims", 30))
     backend = backend_from_args(args).validate()
     policy = None
     if getattr(args, "block", None) or getattr(args, "only", None):  # per-run extras + saved rules
@@ -506,8 +506,8 @@ def add_backend_args(p: argparse.ArgumentParser) -> None:
 
 def add_quality_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("quality and sources")
-    g.add_argument("--verify-claims", type=int, default=12, metavar="N",
-                   help="claims to check against their cited pages (default 12)")
+    g.add_argument("--verify-claims", type=int, default=30, metavar="N",
+                   help="claims to check against their cited pages (default 30)")
     g.add_argument("--no-verify", action="store_true", help="skip claim verification")
     g.add_argument("--block", action="append", metavar="DOMAIN",
                    help="never use this site in this run (repeatable)")
@@ -585,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--max-tasks", type=int, default=6)
     ev.add_argument("--parallel", type=int, default=4)
     ev.add_argument("--searches", type=int, default=4)
-    ev.add_argument("--verify-claims", type=int, default=12)
+    ev.add_argument("--verify-claims", type=int, default=30)
     add_backend_args(ev)
     ev.set_defaults(fn=cmd_eval)
 
