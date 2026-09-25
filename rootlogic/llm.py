@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Callable, Protocol, TypeVar
 
 import anthropic
@@ -88,7 +89,8 @@ class LLM(Protocol):
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 8, recency_days: int = 0,
-                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]: ...
+                 on_step: StepSink | None = None,
+                 seen: Iterable[str] = ()) -> tuple[T, list[SearchHit]]: ...
 
 
 def json_schema(model: type[BaseModel]) -> dict:
@@ -188,14 +190,17 @@ class AnthropicLLM:
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 8, recency_days: int = 0,
-                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]:
+                 on_step: StepSink | None = None,
+                 seen: Iterable[str] = ()) -> tuple[T, list[SearchHit]]:
         submit_tool = {"name": "submit_findings", "description": SUBMIT_DESCRIPTION,
                        "strict": True, "input_schema": json_schema(schema)}
         if self.search is None:
+            # Claude runs its own fetches inside the request, so there is no call of ours to
+            # refuse: ``seen`` applies only to our client-side tools.
             return self._research_server_tools(purpose, system, prompt, schema, submit_tool,
                                                max_searches, on_step)
         return self._research_client_tools(purpose, system, prompt, schema, submit_tool,
-                                           max_searches, recency_days, on_step)
+                                           max_searches, recency_days, on_step, seen)
 
     @staticmethod
     def _submitted(response, schema: type[T]) -> T | None:
@@ -253,11 +258,11 @@ class AnthropicLLM:
         raise LLMError(f"{purpose}: research did not converge")
 
     def _research_client_tools(self, purpose, system, prompt, schema, submit_tool,
-                               max_searches, recency_days, on_step=None) -> tuple:
+                               max_searches, recency_days, on_step=None, seen=()) -> tuple:
         """Our own web tools backed by ``self.search``: portable to any tool-calling model."""
         assert self.search is not None
         box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days,
-                         on_step=on_step)
+                         on_step=on_step, seen=seen)
         tools = [{"name": n, "description": d, "strict": True, "input_schema": p}
                  for n, d, p in WEB_TOOL_SPECS] + [submit_tool]
         messages: list[dict] = [{"role": "user", "content": prompt}]

@@ -493,7 +493,10 @@ def test_the_loop_stops_offering_tools_once_their_budgets_are_spent():
     """Live: a sub-agent made 12 calls and emitted nothing for 84 minutes. Its searches and
     fetches were used up, so every turn was the model calling a dead tool and being told
     'budget used up' - each costing minutes on a local model."""
-    search = StaticSearch(results=[SearchResult(url="https://a.com", title="A", snippet="s")],
+    # The three URLs it fetches have to come back from the search: a fetch of a URL no
+    # search returned is refused and never reaches the budget.
+    search = StaticSearch(results=[SearchResult(url=f"https://a.com/{i}", title="A", snippet="s")
+                                   for i in range(3)],
                           pages={f"https://a.com/{i}": "page text " * 80 for i in range(4)})
     finding = dict(FINDING, answer="wrapped up after budgets spent")
     llm, api, _ = make([
@@ -512,7 +515,7 @@ def test_the_loop_stops_offering_tools_once_their_budgets_are_spent():
     assert len(api.calls) == 5                      # one search, three fetches, one wrap-up
     assert "tools" not in api.calls[-1]             # the last call asked for findings only
     assert api.calls[-1]["response_format"]["json_schema"]["strict"] is True
-    assert len(hits) == 4                           # the search hit plus three fetched pages
+    assert len(hits) == 6                           # three search hits plus three fetched pages
 
 
 def test_strict_mode_recovers_when_a_server_ignores_the_schema():

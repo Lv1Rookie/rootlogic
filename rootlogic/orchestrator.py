@@ -325,7 +325,9 @@ class Orchestrator:
                                     prompt=prompt, schema=FindingDraft,
                                     max_searches=self.budget.max_searches,
                                     recency_days=plan.recency_days,
-                                    on_step=self._step_reporter(task.id))
+                                    on_step=self._step_reporter(task.id),
+                                    # a link the user pasted counts as seen, like a result
+                                    seen=filters.urls_in(plan.topic))
 
     def _step_reporter(self, task_id: str):
         """Turn a sub-agent's searches into events as they happen (from its worker thread:

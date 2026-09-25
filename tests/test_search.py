@@ -252,8 +252,11 @@ def test_a_failed_search_reports_why_it_failed():
 
 
 def test_a_failed_fetch_reports_why_too():
-    search = StaticSearch(results=[SearchResult(url="https://a.com", title="A", snippet="s")])
+    """A URL the search did return, whose page will not come back."""
+    search = StaticSearch(results=[SearchResult(url="https://gone.example", title="A",
+                                               snippet="s")])
     llm, _ = make_llm([
+        [tool_use("web_search", {"query": "one"}, "u0")],
         [tool_use("web_fetch", {"url": "https://gone.example"}, "u1")],
         [tool_use("submit_findings", FINDING, "u2")],
     ], search)
@@ -261,13 +264,15 @@ def test_a_failed_fetch_reports_why_too():
     steps = []
     llm.research(purpose="research:t1", system="s", prompt="p", schema=FindingDraft,
                  on_step=steps.append)
-    assert steps[0].kind == "fetch" and steps[0].error == "not found"
+    fetches = [s for s in steps if s.kind == "fetch"]
+    assert fetches[0].error == "not found"
 
 
 def test_anthropic_client_loop_also_stops_when_budgets_are_spent():
     """The same waste applies to Claude with a SearchProvider: once nothing can be retrieved,
     more tool-armed turns only re-send a growing conversation."""
-    search = StaticSearch(results=[SearchResult(url="https://a.com/0", title="A", snippet="s")],
+    search = StaticSearch(results=[SearchResult(url=f"https://a.com/{i}", title="A", snippet="s")
+                                   for i in range(4)],
                           pages={f"https://a.com/{i}": "page text " * 80 for i in range(4)})
     llm, messages = make_llm([
         [tool_use("web_search", {"query": "one"}, "u1")],
@@ -284,3 +289,75 @@ def test_anthropic_client_loop_also_stops_when_budgets_are_spent():
     assert len(messages.calls) == 5
     last = messages.calls[-1]
     assert [t["name"] for t in last["tools"]] == ["submit_findings"]   # nothing left to search
+
+
+# ------------------------------------------------------------------ invented URLs
+
+def box(search, **kw):
+    from rootlogic.tools import WebToolbox
+    return WebToolbox(search, max_searches=3, **kw)
+
+
+def test_a_url_no_search_returned_is_refused_without_spending_a_fetch():
+    """Live: a run spent 7 of 12 fetches on gov.uk slugs the model built from headlines, all
+    404. The prompt asks it not to; this makes the ask enforceable."""
+    tb = box(StaticSearch(results=[SearchResult(url="https://a.gov/real", title="A", snippet="s")],
+                          pages={"https://a.gov/real": "text " * 40}))
+    tb.run("web_search", {"query": "q"})
+
+    content, is_error = tb.run("web_fetch", {"url": "https://a.gov/guidance/invented-slug"})
+
+    assert is_error and "has not appeared in any search result" in content
+    assert "Search for the document instead" in content
+    assert tb.used["web_fetch"] == 0          # a refusal bought nothing, so it costs nothing
+
+
+def test_a_url_the_search_returned_is_fetched():
+    search = StaticSearch(results=[SearchResult(url="https://a.gov/real", title="A", snippet="s")],
+                          pages={"https://a.gov/real": "real page text"})
+    tb = box(search)
+    tb.run("web_search", {"query": "q"})
+
+    content, is_error = tb.run("web_fetch", {"url": "https://a.gov/real"})
+
+    assert not is_error and "real page text" in content
+    assert search.fetched == ["https://a.gov/real"]
+
+
+def test_a_link_inside_a_fetched_page_counts_as_seen():
+    """Step 4 of the prompt tells it to fetch the real document when a landing page comes
+    back, and that link is in the page text rather than in a search result."""
+    search = StaticSearch(
+        results=[SearchResult(url="https://a.gov/index", title="A", snippet="s")],
+        pages={"https://a.gov/index": "See the full report at https://a.gov/report.pdf for more.",
+               "https://a.gov/report.pdf": "the actual report"})
+    tb = box(search)
+    tb.run("web_search", {"query": "q"})
+    tb.run("web_fetch", {"url": "https://a.gov/index"})
+
+    content, is_error = tb.run("web_fetch", {"url": "https://a.gov/report.pdf"})
+
+    assert not is_error and "the actual report" in content
+
+
+def test_a_link_from_the_topic_counts_as_seen():
+    search = StaticSearch(pages={"https://en.wikipedia.org/wiki/Heat_pump": "seeded page"})
+    tb = box(search, seen=["https://en.wikipedia.org/wiki/Heat_pump"])
+
+    content, is_error = tb.run("web_fetch", {"url": "https://en.wikipedia.org/wiki/Heat_pump"})
+
+    assert not is_error and "seeded page" in content
+
+
+def test_seen_urls_are_matched_after_normalisation():
+    """A result and a fetch that differ only in www, a trailing slash or a tracking param are
+    the same page; refusing the second would be pedantry, not a guard."""
+    search = StaticSearch(results=[SearchResult(url="https://www.a.gov/doc/", title="A",
+                                                snippet="s")],
+                          pages={"https://a.gov/doc?utm_source=x": "same page"})
+    tb = box(search)
+    tb.run("web_search", {"query": "q"})
+
+    content, is_error = tb.run("web_fetch", {"url": "https://a.gov/doc?utm_source=x"})
+
+    assert not is_error and "same page" in content

@@ -23,6 +23,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from typing import TypeVar
 
 import openai
@@ -155,9 +156,10 @@ class OpenAICompatibleLLM:
     # ------------------------------------------------------------------ research subagent
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 8, recency_days: int = 0,
-                 on_step: StepSink | None = None) -> tuple[T, list[SearchHit]]:
+                 on_step: StepSink | None = None,
+                 seen: Iterable[str] = ()) -> tuple[T, list[SearchHit]]:
         box = WebToolbox(self.search, max_searches=max_searches, recency_days=recency_days,
-                         on_step=on_step)
+                         on_step=on_step, seen=seen)
         specs = WEB_TOOL_SPECS + [("submit_findings", SUBMIT_DESCRIPTION, json_schema(schema))]
         tools = [{"type": "function", "function": {
             "name": n, "description": d, "parameters": p, **({"strict": True} if self.strict else {})}}

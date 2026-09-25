@@ -169,7 +169,7 @@ class FakeLLM:
 
     def research(self, *, purpose: str, system: str, prompt: str, schema: type[T],
                  max_searches: int = 8, recency_days: int = 0,
-                 on_step=None) -> tuple[T, list[SearchHit]]:
+                 on_step=None, seen=()) -> tuple[T, list[SearchHit]]:
         self._record(purpose, prompt, searches=2)
         with self._lock:
             self._n += 1

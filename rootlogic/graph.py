@@ -389,7 +389,8 @@ class ResearchGraph:
                                                schema=FindingDraft,
                                                max_searches=self.budget.max_searches,
                                                recency_days=plan.recency_days,
-                                               on_step=self._step_reporter(task.id))
+                                               on_step=self._step_reporter(task.id),
+                                               seen=filters.urls_in(plan.topic))
         except AuthError:
             raise   # credentials or billing: every other call will fail too
         except (LLMError, AgentRefusal) as e:
