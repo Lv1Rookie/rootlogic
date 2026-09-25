@@ -349,7 +349,6 @@ See [docs/langgraph-vs-loop.md](docs/langgraph-vs-loop.md) for a side-by-side co
 
 ## Roadmap
 
-- Resume interrupted sessions from `plan_json` + `tasks`
 - MCP client so users can plug in extra sources (Semantic Scholar, internal docs)
 - Embedding-based memory (sqlite-vec) alongside FTS5
 - Prompt caching for shared worker prefix; eval set of topics with graded reports
