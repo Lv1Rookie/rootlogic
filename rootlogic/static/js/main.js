@@ -12,6 +12,8 @@ import { savePdf, saveMarkdown } from "./export.js";
 import { initTheme } from "./theme.js";
 import { initScrollTop } from "./scrolltop.js";
 import { initCheckboxes } from "./checkbox.js";
+import { initSidebar } from "./sidebar.js";
+import { initOutline } from "./outline.js";
 
 // --------------------------------------------------------------- tabs
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -173,6 +175,8 @@ for (const [id, prop] of [["engine", "value"], ["offline", "checked"],
   initTheme();
   initScrollTop();
   initCheckboxes();
+  initSidebar();
+  initOutline();
   await Promise.all([loadHistory(), loadProfile(), loadRules(), loadPrompts()]);
   const live = (await api("/api/runs")).filter(r => r.status === "running").pop();
   if (live) {

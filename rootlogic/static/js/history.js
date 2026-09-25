@@ -9,6 +9,7 @@ import { renderUsage, maybeResume } from "./usage.js";
 import { trackStage } from "./stages.js";
 import { trackAgent } from "./agents.js";
 import { setReport } from "./export.js";
+import { refreshOutline } from "./outline.js";
 
 export async function loadHistory() {
   const { sessions, suggestions } = await api("/api/sessions");
@@ -55,5 +56,6 @@ export async function openSession(sid) {
   maybeResume(d);
   $("#forget").classList.remove("hidden");
   $("#continue").classList.toggle("hidden", d.session.status !== "done");
+  refreshOutline();
   loadHistory();
 }

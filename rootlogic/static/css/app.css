@@ -158,6 +158,29 @@ main {
 .brand b { font-size: 17px; letter-spacing: -.015em; }
 .brand span { color: var(--muted); font-size: 12px; letter-spacing: .01em; }
 
+/* ---------------------------------------------------------------- hiding the sidebar
+ * Wide enough, the sidebar is a column beside the page and folds away to give the report the
+ * width. Narrow, it is a drawer over the page rather than a slab appended underneath it,
+ * which is where a single-column grid would otherwise put it - far below everything, reached
+ * by scrolling past the whole report.
+ */
+.rail-btn {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+  transition: color .15s var(--ease), border-color .15s var(--ease);
+}
+.rail-btn:hover { color: var(--accent); border-color: var(--accent-line); }
+.rail-open-btn {
+  position: fixed; top: 14px; left: 14px; z-index: 45;
+  background: var(--panel); box-shadow: var(--sh-2);
+}
+body:not(.rail-hidden) .rail-open-btn { display: none; }
+body.rail-hidden .layout { grid-template-columns: minmax(0, 1fr); }
+body.rail-hidden aside { display: none; }
+/* the floating button stands where the composer would start, so the page steps aside for it */
+body.rail-hidden main { padding-top: 60px; }
+
 /* The theme toggle is the one control that lives in the brand row. */
 .theme-toggle {
   margin-left: auto; flex: none;
@@ -396,6 +419,13 @@ label.inline:hover { color: var(--ink); }
  * status pill so a run is never silently out of sight, and the same chevron the sidebar
  * sections use to say so. */
 .statusbar-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* Reaching a panel under a long report meant scrolling past the report. This says where to
+ * go, and it lives in the head so that folding the bar away does not take it too. */
+.jump {
+  width: auto; min-width: 120px; max-width: 200px; height: 34px; min-height: 0;
+  font-size: 13px; padding: 4px 28px 4px 10px; border-radius: var(--r-sm); flex: none;
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+}
 .bar-toggle {
   border: none; background: none; padding: 0; cursor: pointer; color: var(--muted);
   display: grid; place-items: center; flex: none;
@@ -418,6 +448,7 @@ label.inline:hover { color: var(--ink); }
 .statusbar.collapsed .meta { margin: 0; flex: none; }
 .statusbar.collapsed #v-meta { display: none; }
 .statusbar.collapsed .row { display: none; }
+.statusbar.collapsed .jump { height: 30px; font-size: 12.5px; }
 
 .meta { color: var(--muted); font-size: 13px; }
 
@@ -615,15 +646,21 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 
 /* ================================================================= responsive */
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; }
-  /* One column puts the sidebar first in the source, which would bury the composer under a
-   * screenful of settings. The run comes first; the settings follow it. */
-  main { order: 1; }
-  aside { order: 2; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  main { padding-top: 60px; }                 /* room for the floating toggle */
+  /* The sidebar becomes a drawer: over the page when asked for, gone otherwise. */
   aside {
-    position: static; height: auto; border-right: none;
-    border-top: 1px solid var(--line); border-bottom: none;
-    padding-bottom: 20px;
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60;
+    width: min(330px, 86vw); height: 100dvh;
+    border-right: 1px solid var(--line); box-shadow: var(--sh-3);
+    transform: translateX(-100%); transition: transform .25s var(--ease);
+  }
+  body:not(.rail-hidden) aside { transform: none; }
+  body.rail-hidden aside { display: flex; }   /* a drawer slides out, it does not vanish */
+  #rail-scrim[hidden] { display: none; }
+  #rail-scrim {
+    position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .45);
+    animation: fold-in .2s var(--ease) both;
   }
   #history, #suggestions { max-height: 55vh; }   /* still capped: a long list is a long scroll */
   .brand { position: static; backdrop-filter: none; }

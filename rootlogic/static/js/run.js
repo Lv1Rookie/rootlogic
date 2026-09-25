@@ -12,6 +12,7 @@ import { loadProfile } from "./panels.js";
 import { trackStage } from "./stages.js";
 import { trackAgent } from "./agents.js";
 import { setReport } from "./export.js";
+import { refreshOutline } from "./outline.js";
 
 export async function startRun(topic, parent = null) {
   const run = await api("/api/runs", {
@@ -52,6 +53,7 @@ export function handle(ev) {
       $("#report-body").innerHTML = md(ev.markdown);
       setReport(ev.markdown, { topic: $("#v-topic").textContent, session: state.sid });
       showTab("report");
+      refreshOutline();          // the report brings its own headings to jump to
       return;
     case "run.error": return logEvent({ ...ev, type: "run.error" });
     case "run.finished":
@@ -84,6 +86,7 @@ async function afterFinish() {
   loadHistory();
   loadProfile();
   $("#continue").classList.toggle("hidden", $("#v-status").textContent !== "done");
+  refreshOutline();
   if (!state.sid) return;
   $("#forget").classList.remove("hidden");
   try {

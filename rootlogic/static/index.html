@@ -14,10 +14,14 @@
 </head>
 <body>
 <div class="layout">
-  <aside>
+  <aside id="rail">
     <div class="brand">
       <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="var(--accent)"/><path d="M10 21l6-11 6 11" stroke="var(--accent-ink)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <div><b>rootlogic</b><br><span>agentic research assistant</span></div>
+      <button type="button" class="rail-btn" id="rail-close" aria-controls="rail"
+              aria-expanded="true" title="Hide the sidebar"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
       <div class="uiv-theme-slot">
         <label class="uiv-theme" aria-label="Switch between light and dark">
           <input type="checkbox" id="theme">
@@ -136,6 +140,9 @@
             <div class="topic" id="v-topic"></div>
             <div class="meta"><span id="v-status" class="pill"></span> <span id="v-meta"></span></div>
           </div>
+          <select id="jump" class="jump" aria-label="Jump to a section of the page">
+            <option value="">Jump to…</option>
+          </select>
         </div>
         <div class="row" role="group" aria-label="Run controls">
           <button class="btn" id="pause" title="Hold the run at the next sub-task boundary until you resume">Pause</button>
@@ -242,6 +249,13 @@
     </section>
   </main>
 </div>
+
+<button type="button" class="rail-btn rail-open-btn" id="rail-open" aria-controls="rail"
+        aria-expanded="false" title="Show the sidebar"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+
+<div id="rail-scrim" hidden></div>
 
 <button class="uiv-top" id="to-top" type="button" aria-label="Back to top">
   <svg class="svgIcon" viewBox="0 0 384 512" aria-hidden="true"><path d="M214.6 41.4c-12.5-12.5-32.8-12.5-45.3 0l-160 160c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L160 141.2V448c0 17.7 14.3 32 32 32s32-14.3 32-32V141.2L329.4 246.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-160-160z"></path></svg>

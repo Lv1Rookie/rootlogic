@@ -9,6 +9,7 @@ import { resetStages } from "./stages.js";
 import { resetAgents } from "./agents.js";
 import { resetSteer } from "./steer.js";
 import { clearReport } from "./export.js";
+import { refreshOutline } from "./outline.js";
 
 export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
                        paused: false };
@@ -71,4 +72,5 @@ export function resetView(topic) {
   ["#resume", "#forget", "#continue"].forEach(s => $(s).classList.add("hidden"));
   setStatus("running");
   showTab("log");
+  refreshOutline();
 }
