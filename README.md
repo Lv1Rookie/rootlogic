@@ -267,6 +267,13 @@ rootlogic research --provider openai --base-url http://localhost:20128/v1 --mode
   (OmniRoute allows 30s), and a local model can spend a minute on a long planning prompt before
   it emits anything; a streamed reply starts at once. The adapter reassembles the completion from
   deltas, so nothing else in the pipeline changes.
+- **Transient gateway failures are retried**: a timeout, a dropped connection, a 429 or a 5xx
+  gets two more attempts, 1.5s apart and doubling, honouring the server's own `Retry-After`
+  when it sends one. A rejected key or a malformed request is raised at once, because it would
+  fail identically. The OpenAI SDK's own two retries are turned off so this is the only policy:
+  left on, each of ours became three, and a run took minutes to give up on a gateway that was
+  down. Claude's own adapter keeps the Anthropic SDK's retries — it talks to the API directly,
+  with no router in between.
 - `--reasoning-effort none|low|medium|high` for thinking models on servers that support it.
   Locally this dominates the wall clock: `qwen3:8b` spent 72s on a clarification that takes
   1.3s with `none`.

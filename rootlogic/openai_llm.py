@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -55,7 +56,10 @@ class OpenAICompatibleLLM:
                            "tavily): Claude's web tools only work with Claude.")
         if client is None:
             key = api_key or os.environ.get("OPENAI_API_KEY") or ("local" if base_url else None)
-            client = openai.OpenAI(base_url=base_url, api_key=key)
+            # One retry policy, ours: the SDK's own default is two more attempts on top of
+            # every one of ours, which would be nine tries and several minutes of waiting
+            # before a run gave up on a gateway that is simply down.
+            client = openai.OpenAI(base_url=base_url, api_key=key, max_retries=0)
         self.client = client
         self.model = model
         self.search = search
@@ -75,26 +79,23 @@ class OpenAICompatibleLLM:
             # whole class of "upstream timeout" failures disappears.
             kwargs["stream"] = True
             kwargs.setdefault("stream_options", {"include_usage": True})
-        try:
-            response = self.client.chat.completions.create(model=self.model, **kwargs)
-            if self.stream:
-                response = _collect(response)
-        except openai.APIConnectionError as e:
-            raise LLMError(f"network error during {purpose}: {e}") from e
-        except openai.RateLimitError as e:
-            raise LLMError(f"rate limited during {purpose}; try again shortly") from e
-        except openai.AuthenticationError as e:
-            raise AuthError("The API key was rejected. Check OPENAI_API_KEY (or --base-url for "
-                            "a local server, which usually needs no key).") from e
-        except openai.APIStatusError as e:
-            if "quota" in (e.message or "").lower() or "billing" in (e.message or "").lower():
-                raise AuthError(f"The model provider rejected the request for billing reasons: "
-                                f"{e.message}") from e
-            raise LLMError(f"API error {e.status_code} during {purpose}: {e.message}") from e
-        except openai.APIError as e:
-            # The base class, and not a subclass of any of the above: a streamed request that
-            # fails mid-stream raises it, which escaped as a traceback from a live run.
-            raise LLMError(f"API error during {purpose}: {e}") from e
+        # A gateway that times out or a router that returns 502 is saying "not now", not "no".
+        # Those cost a whole run - 504 at the planning step ended one outright - so they are
+        # tried again before the run is given up on. A rejected key or a malformed request
+        # would fail the same way every time, so those are raised at once.
+        delay = RETRY_BACKOFF
+        for attempt in range(RETRIES + 1):
+            try:
+                response = self.client.chat.completions.create(model=self.model, **kwargs)
+                if self.stream:
+                    response = _collect(response)
+                break
+            except openai.APIError as e:
+                error = _as_error(purpose, e)
+                if isinstance(error, AuthError) or not _worth_retrying(e) or attempt == RETRIES:
+                    raise error from e
+                SLEEP(_retry_after(e, delay))
+                delay *= 2
 
         # Not every OpenAI-compatible server returns a well-formed completion: routers and
         # local servers can answer 200 with an error object and no choices at all.
@@ -325,6 +326,55 @@ def _why(response) -> str:
         return f"Provider said: {error}"
     return ("No error message was included. The model may be rate limited or unavailable: try "
             "another --model, or --no-strict if it rejects strict JSON schemas.")
+
+
+# Transport and gateway failures that a second attempt often gets past. 429 is included
+# because a rate limit is a wait, not a refusal; 4xx codes that mean the request itself is
+# wrong are deliberately absent.
+TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+RETRIES = 2                 # extra attempts after the first
+RETRY_BACKOFF = 1.5         # seconds before the first retry, doubled after that
+RETRY_CAP = 30.0            # a Retry-After longer than this is not worth a run's wall clock
+SLEEP = time.sleep          # named so tests can wait for nothing
+
+
+def _worth_retrying(e: openai.APIError) -> bool:
+    if isinstance(e, openai.AuthenticationError):
+        return False
+    if isinstance(e, (openai.APIConnectionError, openai.RateLimitError)):
+        return True          # timeouts, dropped connections, "slow down"
+    if isinstance(e, openai.APIStatusError):
+        return e.status_code in TRANSIENT_STATUS
+    return True              # the bare base class: a stream that broke partway
+
+
+def _retry_after(e: openai.APIError, default: float) -> float:
+    """Honour a server's own Retry-After, which knows better than a doubling guess."""
+    response = getattr(e, "response", None)
+    try:
+        wait = float(response.headers.get("retry-after", ""))
+    except (AttributeError, TypeError, ValueError):
+        return default
+    return min(wait, RETRY_CAP) if wait > 0 else default
+
+
+def _as_error(purpose: str, e: openai.APIError) -> LLMError:
+    """The exception this request should end with, if it is not going to be tried again."""
+    if isinstance(e, openai.AuthenticationError):
+        return AuthError("The API key was rejected. Check OPENAI_API_KEY (or --base-url for "
+                         "a local server, which usually needs no key).")
+    if isinstance(e, openai.APIConnectionError):
+        return LLMError(f"network error during {purpose}: {e}")
+    if isinstance(e, openai.RateLimitError):
+        return LLMError(f"rate limited during {purpose}; try again shortly")
+    if isinstance(e, openai.APIStatusError):
+        if "quota" in (e.message or "").lower() or "billing" in (e.message or "").lower():
+            return AuthError(f"The model provider rejected the request for billing reasons: "
+                             f"{e.message}")
+        return LLMError(f"API error {e.status_code} during {purpose}: {e.message}")
+    # The base class, and not a subclass of any of the above: a streamed request that fails
+    # mid-stream raises it, which escaped as a traceback from a live run.
+    return LLMError(f"API error during {purpose}: {e}")
 
 
 def _findings_in_text(schema: type[T], text: str | None) -> T | None:

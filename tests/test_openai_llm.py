@@ -12,7 +12,7 @@ import pytest
 from openai.types.chat import ChatCompletion
 
 from rootlogic.backend import Backend, BackendError, parse_prices
-from rootlogic.llm import AgentRefusal, LLMError
+from rootlogic.llm import AgentRefusal, AuthError, LLMError
 from rootlogic.models import Clarification, FindingDraft, PlanDraft
 from rootlogic.openai_llm import OpenAICompatibleLLM
 from rootlogic.search import SearchResult, StaticSearch
@@ -42,7 +42,10 @@ class FakeCompletions:
 
     def create(self, **kw):
         self.calls.append({**kw, "messages": [dict(m) for m in kw["messages"]]})
-        return self.replies.pop(0)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):   # a scripted failure, raised where the SDK would
+            raise reply
+        return reply
 
 
 def make(replies, *, strict=True, search=None, prices=None):
@@ -591,3 +594,99 @@ def test_a_plan_cut_off_mid_object_keeps_the_sub_tasks_that_arrived():
     assert [t.question for t in got.subtasks] == ["Question 1?", "Question 2?"], \
         "the sub-tasks that arrived whole should survive the one that did not"
     assert got.objective == "Assess honey against cough syrup"
+
+
+def _status_error(code: int, message: str = "upstream timeout"):
+    """The SDK's own error type, so the adapter's isinstance checks are the ones under test."""
+    import httpx
+    request = httpx.Request("POST", "http://gateway.local/v1/chat/completions")
+    return openai.APIStatusError(message, response=httpx.Response(code, request=request),
+                                 body=None)
+
+
+def test_a_gateway_timeout_is_tried_again(monkeypatch):
+    """A 504 at the planning step ended a whole run. A router saying "not now" is not the same
+    as a request being wrong, and the research behind it has already been paid for."""
+    import rootlogic.openai_llm as mod
+    waits = []
+    monkeypatch.setattr(mod, "SLEEP", waits.append)
+
+    llm, fake, _ = make([_status_error(504), _status_error(502),
+                         completion(json.dumps(CLARIFY))], strict=False)
+    got = llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+    assert got.needs_clarification is False
+    assert len(fake.calls) == 3, "it should have tried again, twice"
+    assert waits == [1.5, 3.0], "and waited longer each time rather than hammering"
+
+
+def test_a_rejected_key_is_not_tried_again(monkeypatch):
+    """Retrying what will fail identically wastes the reader's time and says nothing new."""
+    import httpx
+    import rootlogic.openai_llm as mod
+    monkeypatch.setattr(mod, "SLEEP", lambda _: None)
+
+    request = httpx.Request("POST", "http://gateway.local/v1/chat/completions")
+    rejected = openai.AuthenticationError(
+        "bad key", response=httpx.Response(401, request=request), body=None)
+    llm, fake, _ = make([rejected, completion(json.dumps(CLARIFY))], strict=False)
+
+    with pytest.raises(AuthError):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert len(fake.calls) == 1, "a rejected key fails the same way every time"
+
+
+def test_a_malformed_request_is_not_tried_again(monkeypatch):
+    """400 means the request itself is wrong; sending it twice more proves only that."""
+    import rootlogic.openai_llm as mod
+    monkeypatch.setattr(mod, "SLEEP", lambda _: None)
+
+    llm, fake, _ = make([_status_error(400, "invalid schema"),
+                         completion(json.dumps(CLARIFY))], strict=False)
+    with pytest.raises(LLMError):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert len(fake.calls) == 1
+
+
+def test_retries_are_bounded(monkeypatch):
+    """A gateway that is down stays down: the run should end, not loop."""
+    import rootlogic.openai_llm as mod
+    monkeypatch.setattr(mod, "SLEEP", lambda _: None)
+
+    llm, fake, _ = make([_status_error(503) for _ in range(5)], strict=False)
+    with pytest.raises(LLMError, match="503"):
+        llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+    assert len(fake.calls) == 3, "the first attempt and two retries, then it gives up"
+
+
+def test_a_servers_own_retry_after_is_honoured(monkeypatch):
+    """A rate limit usually says how long to wait. That is better information than doubling."""
+    import httpx
+    import rootlogic.openai_llm as mod
+    waits = []
+    monkeypatch.setattr(mod, "SLEEP", waits.append)
+
+    request = httpx.Request("POST", "http://gateway.local/v1/chat/completions")
+    limited = openai.RateLimitError(
+        "slow down",
+        response=httpx.Response(429, request=request, headers={"retry-after": "4"}), body=None)
+    llm, _, _ = make([limited, completion(json.dumps(CLARIFY))], strict=False)
+    llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+    assert waits == [4.0], "the server's number, not ours"
+
+
+def test_the_sdk_is_not_retrying_underneath_us(monkeypatch):
+    """The SDK retries twice by default. Left on, every one of our attempts becomes three:
+    nine requests and minutes of waiting before a run gives up on a gateway that is down."""
+    seen = {}
+
+    class Spy:
+        def __init__(self, **kw):
+            seen.update(kw)
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **k: None))
+
+    monkeypatch.setattr(openai, "OpenAI", Spy)
+    OpenAICompatibleLLM(lambda u: None, model="m", search=StaticSearch(),
+                        base_url="http://gateway.local/v1")
+    assert seen.get("max_retries") == 0
