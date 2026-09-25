@@ -47,6 +47,7 @@ export function handle(ev) {
     case "request.resolved": {
       const c = $(`#req-${ev.request_id}`);
       if (c) c.remove();
+      refreshOutline();      // ...and out of it again when the card is answered
       return;
     }
     case "report":

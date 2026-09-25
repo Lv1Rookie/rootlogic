@@ -6,6 +6,7 @@
 import { $, esc } from "./dom.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
+import { refreshOutline } from "./outline.js";
 import { setPlan, dropTasks } from "./plan.js";
 import { hasQueued, drain } from "./steer.js";
 
@@ -15,6 +16,7 @@ function card(ev, title, bodyHTML) {
   el.id = `req-${ev.request_id}`;
   el.innerHTML = `<h3>${esc(title)}</h3>${bodyHTML}`;
   $("#cards").appendChild(el);
+  refreshOutline();          // "Waiting for you" is only in the menu while a card is up
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   return el;
 }

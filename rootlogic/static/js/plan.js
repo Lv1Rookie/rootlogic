@@ -2,6 +2,7 @@
 
 import { $, esc } from "./dom.js";
 import { state } from "./state.js";
+import { refreshOutline } from "./outline.js";
 
 export function setPlan(plan) {
   state.objective = plan.objective;
@@ -15,7 +16,12 @@ export function setPlan(plan) {
 }
 
 export function renderPlan() {
+  const wasHidden = $("#plan-panel").classList.contains("hidden");
   $("#plan-panel").classList.toggle("hidden", !state.order.length);
+  // The menu lists the panels that are on the page, so it has to be rebuilt when one
+  // arrives - otherwise Plan is missing from it for the whole run and shows up only once
+  // the report lands, which is exactly when it stopped being the hard thing to scroll to.
+  if (wasHidden !== $("#plan-panel").classList.contains("hidden")) refreshOutline();
   $("#plan-objective").textContent = state.objective;
   $("#plan-rows").innerHTML = state.order.map(id => {
     const t = state.tasks[id];
