@@ -88,8 +88,20 @@ class Run:
             return self.events[cursor:]
 
     # ------------------------------------------------------------- human requests
+    @property
+    def aborting(self) -> bool:
+        control = getattr(self.engine, "control", None)
+        return bool(getattr(control, "aborting", False))
+
     def request(self, kind: str, payload: dict) -> Any:
-        """Called from the engine thread. Blocks until ``respond`` supplies an answer."""
+        """Called from the engine thread. Blocks until ``respond`` supplies an answer.
+
+        An aborting run never puts a card up: the clarifier asks its questions one after the
+        next with no abort check between them, so closing the open card only made room for the
+        following one and the run went on collecting answers it had been told to abandon.
+        """
+        if self.aborting:
+            return _STOP_ANSWER.get(kind, "")
         rid = uuid.uuid4().hex[:8]
         with self._cond:
             self.pending = {"request_id": rid, "kind": kind, **payload}

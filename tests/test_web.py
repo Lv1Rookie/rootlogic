@@ -600,3 +600,15 @@ def test_abort_without_a_card_leaves_answering_alone(client):
     client.post(f"/api/runs/{rid}/abort")
     s = wait(client, rid, finished)
     assert s["status"] == "aborted"
+
+
+def test_abort_under_a_question_does_not_open_the_next_one(client):
+    """Reported from a live run: the clarifier asks its questions back to back, so closing the
+    open card only made room for the next one."""
+    rid = client.post("/api/runs", json={"topic": "AI"}).json()["run_id"]
+    wait(client, rid, pending("question"))
+    assert client.post(f"/api/runs/{rid}/abort").status_code == 200
+    s = wait(client, rid, finished)
+    assert s["status"] == "aborted" and s["pending"] is None
+    kinds = [e.get("kind") for e in sse_events(client, rid) if e["type"] == "request"]
+    assert kinds == ["question"]     # the second question never went up
