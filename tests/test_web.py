@@ -509,19 +509,22 @@ def test_the_pdf_is_titled_after_the_report_not_the_app():
 
 
 def test_the_sidebar_can_be_hidden_and_the_page_can_be_jumped_around():
-    """Below the layout's breakpoint a single-column grid put the sidebar underneath the
-    report, so the settings sat a whole paper's worth of scrolling away; and a finished report
-    separated the panels above and below it by screenfuls of prose."""
+    """A single-column grid put the sidebar underneath the report, so the settings sat a whole
+    paper's worth of scrolling away; and a finished report separated the panels above and
+    below it by screenfuls of prose. The sidebar stays a column at every width - laying it
+    over the page hid the thing the reader was looking at."""
     from pathlib import Path
     static = Path(__file__).resolve().parents[1] / "rootlogic" / "static"
     html = (static / "index.html").read_text()
     css = (static / "css" / "app.css").read_text()
 
-    for control in ('id="rail-close"', 'id="rail-open"', 'id="rail-scrim"', 'id="jump"'):
+    for control in ('id="rail-close"', 'id="rail-open"', 'id="jump"'):
         assert control in html, f"missing {control}"
-    assert "body.rail-hidden aside { display: none; }" in css, "wide: it folds away"
-    assert "transform: translateX(-100%)" in css, "narrow: it slides out over the page"
+    assert "body.rail-hidden aside { display: none; }" in css, "hidden means gone, not faded"
+    assert "position: fixed" not in css.split("@media (max-width: 900px)")[1].split("}")[0], \
+        "the sidebar is a column at every width, never a sheet over the page"
 
     js = (static / "js" / "outline.js").read_text()
     assert "#report-body" in js and "h1, h2" in js, \
         "the report's own headings belong in the jump menu"
+    assert '"#statusbar"' not in js, "the menu lives in the status bar, so it is never lost"

@@ -645,30 +645,24 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 #steer { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 /* ================================================================= responsive */
+/* A narrow window makes the sidebar a narrower column - never a sheet laid over the page,
+ * and never a slab appended under it. Both stay visible and the reader hides the one they
+ * are not using. */
 @media (max-width: 900px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  main { padding-top: 60px; }                 /* room for the floating toggle */
-  /* The sidebar becomes a drawer: over the page when asked for, gone otherwise. */
-  aside {
-    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60;
-    width: min(330px, 86vw); height: 100dvh;
-    border-right: 1px solid var(--line); box-shadow: var(--sh-3);
-    transform: translateX(-100%); transition: transform .25s var(--ease);
-  }
-  body:not(.rail-hidden) aside { transform: none; }
-  body.rail-hidden aside { display: flex; }   /* a drawer slides out, it does not vanish */
-  #rail-scrim[hidden] { display: none; }
-  #rail-scrim {
-    position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .45);
-    animation: fold-in .2s var(--ease) both;
-  }
-  #history, #suggestions { max-height: 55vh; }   /* still capped: a long list is a long scroll */
-  .brand { position: static; backdrop-filter: none; }
+  .layout { grid-template-columns: clamp(210px, 30vw, 280px) minmax(0, 1fr); }
   main { padding: 16px 16px 72px; }
-  .statusbar { position: static; }
+  body.rail-hidden main { padding-top: 60px; }   /* clear of the floating toggle */
+  #history, #suggestions { max-height: 55vh; }   /* still capped: a long list is a long scroll */
   .ev { grid-template-columns: 56px 1fr; }
   .ev .ty { grid-column: 2; }
   .ev .msg { grid-column: 1 / -1; padding-left: 66px; text-indent: -66px; }
+}
+/* Narrower still there is no room for two columns, so the sidebar folds away by default and
+ * comes back over its own width when asked for. */
+@media (max-width: 620px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  body:not(.rail-hidden) .layout { grid-template-columns: minmax(180px, 46vw) minmax(0, 1fr); }
+  .brand { position: static; backdrop-filter: none; }
 }
 @media (max-width: 560px) {
   .composer-bar { flex-direction: column; align-items: stretch; }

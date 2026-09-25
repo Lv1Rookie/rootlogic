@@ -9,7 +9,7 @@ import { $ } from "./dom.js";
 // Panels worth jumping to, in the order they appear. A panel that is hidden is left out.
 const PANELS = [
   ["#start", "New research"],
-  ["#statusbar", "This session"],
+  // not the status bar: the menu is in it, so it is never the thing out of reach
   ["#cards", "Waiting for you"],
   ["#continue", "Continue this research"],
   ["#progress-panel", "Progress"],
