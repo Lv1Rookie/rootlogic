@@ -2,7 +2,20 @@
 
 import os
 
+import pytest
+
 from rootlogic.cli import load_env_file
+
+
+@pytest.fixture(autouse=True)
+def restore_environment():
+    """``load_env_file`` writes to ``os.environ`` for real, which is the point of it. Without
+    this, a variable set from a fixture file outlived its test: ROOTLOGIC_HOME leaked, and
+    every later test that ran the CLI wrote its reports into the directory this test named."""
+    before = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(before)
 
 
 def write(tmp_path, text):
