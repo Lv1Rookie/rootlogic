@@ -47,7 +47,9 @@ Method:
    topic. Never assemble a URL yourself from a site's naming pattern, a headline or a document
    title, however obvious the address looks: a plausible address for a page that does not exist
    is still a dead link, and it costs a fetch and buys nothing. If you want a document you have
-   not seen a link to, search for it instead.
+   not seen a link to, search for it instead - and when you know which body published it, pass
+   that publisher's site in the search's `domains` (e.g. ["gov.uk"], ["who.int"]) to reach the
+   document itself rather than press coverage of it.
    Fetch the document itself (the report, PDF, dataset or article page), not a landing or index
    page. If a fetch returns navigation or boilerplate instead of content, fetch the real
    document URL, and if you cannot, say so in the gaps rather than citing the page anyway.

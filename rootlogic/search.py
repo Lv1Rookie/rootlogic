@@ -24,7 +24,10 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from .filters import clean_domain
+
 DEFAULT_MAX_CHARS = 20_000
+MAX_DOMAINS = 3          # sites one search may be restricted to
 
 
 class SearchResult(BaseModel):
@@ -47,9 +50,14 @@ class SearchError(RuntimeError):
 class SearchProvider(Protocol):
     name: str
 
-    def search(self, query: str, *, max_results: int = 5,
-               recency_days: int = 0) -> list[SearchResult]:
-        """Web search. ``recency_days`` > 0 asks the provider to prefer/limit to recent pages."""
+    def search(self, query: str, *, max_results: int = 5, recency_days: int = 0,
+               domains: list[str] | None = None) -> list[SearchResult]:
+        """Web search. ``recency_days`` > 0 asks the provider to prefer/limit to recent pages.
+
+        ``domains`` restricts results to those sites, which is how a sub-agent reaches a
+        primary source it cannot otherwise surface - the official consultation on gov.uk
+        rather than the trade-press write-up of it.
+        """
         ...
 
     def fetch(self, url: str) -> FetchedPage:
@@ -104,12 +112,18 @@ class TavilySearch:
         except (urllib.error.URLError, TimeoutError) as e:
             raise SearchError(f"Tavily {path} failed: {e}") from e
 
-    def search(self, query: str, *, max_results: int = 5,
-               recency_days: int = 0) -> list[SearchResult]:
+    def search(self, query: str, *, max_results: int = 5, recency_days: int = 0,
+               domains: list[str] | None = None) -> list[SearchResult]:
         body: dict = {"query": query, "max_results": max(1, min(max_results, 20)),
                       "search_depth": "basic", "include_published_date": True}
         if tr := _time_range(recency_days):
             body["time_range"] = tr
+        if domains:
+            # A site-restricted search is a narrow haystack, and "basic" depth on a narrow
+            # haystack often returns the section page rather than the document. The whole
+            # point of naming the site is to reach the document, so pay for the deeper pass.
+            body["include_domains"] = [clean_domain(d) for d in domains[:MAX_DOMAINS] if d]
+            body["search_depth"] = "advanced"
         data = self._post("/search", body)
         return [SearchResult(url=r["url"], title=r.get("title") or "",
                              snippet=r.get("content") or "",
@@ -141,11 +155,18 @@ class StaticSearch:
         self.results = results or []
         self.pages = pages or {}
         self.queries: list[tuple[str, int]] = []   # (query, recency_days)
+        self.domain_queries: list[tuple[str, list[str]]] = []
         self.fetched: list[str] = []
 
-    def search(self, query: str, *, max_results: int = 5,
-               recency_days: int = 0) -> list[SearchResult]:
+    def search(self, query: str, *, max_results: int = 5, recency_days: int = 0,
+               domains: list[str] | None = None) -> list[SearchResult]:
         self.queries.append((query, recency_days))
+        self.domain_queries.append((query, list(domains or [])))
+        if domains:
+            allowed = {clean_domain(d) for d in domains}
+            hits = [r for r in self.results
+                    if any(clean_domain(r.url).endswith(d) for d in allowed)]
+            return hits[:max_results]
         return self.results[:max_results]
 
     def fetch(self, url: str) -> FetchedPage:

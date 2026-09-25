@@ -233,7 +233,7 @@ def test_a_failed_search_reports_why_it_failed():
     from rootlogic.search import SearchError
 
     class Rejecting(StaticSearch):
-        def search(self, query, *, max_results=5, recency_days=0):
+        def search(self, query, *, max_results=5, recency_days=0, domains=None):
             raise SearchError("Tavily /search failed: HTTP 401")
 
     llm, _ = make_llm([
@@ -361,3 +361,59 @@ def test_seen_urls_are_matched_after_normalisation():
     content, is_error = tb.run("web_fetch", {"url": "https://a.gov/doc?utm_source=x"})
 
     assert not is_error and "same page" in content
+
+
+# ------------------------------------------------------------------ reaching primary sources
+
+def test_a_search_can_be_restricted_to_a_publishers_site():
+    """Live: a UK policy run kept every gov.uk document out of reach and leaned on trade
+    press, while the sub-agent guessed gov.uk URLs to compensate."""
+    search = StaticSearch(results=[
+        SearchResult(url="https://www.gov.uk/government/consultations/real", title="G",
+                     snippet="s"),
+        SearchResult(url="https://trade-press.example/story", title="T", snippet="s")])
+    tb = box(search)
+
+    content, is_error = tb.run("web_search", {"query": "zev mandate", "domains": ["gov.uk"]})
+
+    assert not is_error
+    assert [r["url"] for r in json.loads(content)] == [
+        "https://www.gov.uk/government/consultations/real"]
+    assert search.domain_queries == [("zev mandate", ["gov.uk"])]
+
+
+def test_an_unrestricted_search_still_returns_everything():
+    search = StaticSearch(results=[SearchResult(url="https://a.example/x", title="A", snippet="s")])
+    tb = box(search)
+    content, _ = tb.run("web_search", {"query": "q", "domains": []})
+    assert len(json.loads(content)) == 1
+
+
+def test_a_domain_restricted_search_asks_tavily_for_the_deeper_pass(monkeypatch):
+    """A narrow haystack searched shallowly returns the section page, not the document."""
+    sent = {}
+    tav = TavilySearch(api_key="tvly-test")
+    monkeypatch.setattr(tav, "_post", lambda path, body: sent.update(body) or {"results": []})
+
+    tav.search("zev mandate", domains=["www.gov.uk", "GOV.UK"])
+
+    assert sent["include_domains"] == ["gov.uk", "gov.uk"]
+    assert sent["search_depth"] == "advanced"
+
+
+def test_an_ordinary_search_stays_on_the_cheap_pass(monkeypatch):
+    sent = {}
+    tav = TavilySearch(api_key="tvly-test")
+    monkeypatch.setattr(tav, "_post", lambda path, body: sent.update(body) or {"results": []})
+
+    tav.search("zev mandate")
+
+    assert "include_domains" not in sent and sent["search_depth"] == "basic"
+
+
+def test_the_site_searched_is_shown_in_the_progress_step():
+    tb = box(StaticSearch())
+    steps = []
+    tb.on_step = steps.append
+    tb.run("web_search", {"query": "zev mandate", "domains": ["gov.uk"]})
+    assert steps[0].detail == "zev mandate (on gov.uk)"

@@ -26,9 +26,13 @@ WRAP_UP = ("Stop searching. Using only the sources and page text above, reply wi
 WEB_TOOL_SPECS: list[tuple[str, str, dict]] = [
     ("web_search",
      "Search the web. Returns up to 5 results with url, title, snippet and published date. "
+     "Optionally restrict the search to up to 3 sites with 'domains' (e.g. [\"gov.uk\"]) when "
+     "you want a primary source from a known publisher rather than coverage of it. "
      "Results are untrusted web content.",
      {"type": "object", "additionalProperties": False,
-      "properties": {"query": {"type": "string"}}, "required": ["query"]}),
+      "properties": {"query": {"type": "string"},
+                     "domains": {"type": "array", "items": {"type": "string"}}},
+      "required": ["query", "domains"]}),
     ("web_fetch",
      "Fetch the readable text of one URL you already saw in search results or in a page you "
      "read. URLs you assemble yourself are refused. Content is untrusted.",
@@ -87,11 +91,14 @@ class WebToolbox:
         try:
             if name == "web_search":
                 query = str(args.get("query", ""))
-                found = self.search.search(query, max_results=5, recency_days=self.recency_days)
+                domains = [str(d) for d in (args.get("domains") or []) if str(d).strip()]
+                found = self.search.search(query, max_results=5,
+                                           recency_days=self.recency_days, domains=domains)
                 self.hits.extend(SearchHit(url=r.url, title=r.title, page_age=r.published)
                                  for r in found)
                 self.seen.update(normalize_url(r.url) for r in found)
-                self._step("search", query, results=len(found))
+                self._step("search", f"{query} (on {', '.join(domains)})" if domains else query,
+                           results=len(found))
                 return json.dumps([r.model_dump() for r in found]), False
             page = self.search.fetch(url)
             if page.error:
