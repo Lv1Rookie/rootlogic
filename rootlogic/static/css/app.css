@@ -178,11 +178,11 @@ main {
 body:not(.rail-hidden) .rail-open-btn { display: none; }
 body.rail-hidden .layout { grid-template-columns: minmax(0, 1fr); }
 body.rail-hidden aside { display: none; }
-/* The floating button is pinned to the viewport, so anything that comes to rest under it has
- * to leave it room: the page starts below it, and the status bar - which stops at the top of
- * the window as the reader scrolls - starts to the right of it. */
-body.rail-hidden main { padding-top: 60px; }
-body.rail-hidden .statusbar { padding-left: 58px; }
+/* The floating button is pinned to the viewport, so the column moves over to leave it a
+ * gutter of its own. Indenting only the status bar was not enough: its panel still passed
+ * beneath the button, and it no longer lined up with the panels under it. Moving the whole
+ * column keeps them aligned with each other and clear of the button. */
+body.rail-hidden main { padding-left: 62px; }
 .rail-open-btn { z-index: 50; }
 
 /* The theme toggle is the one control that lives in the brand row. */
@@ -658,7 +658,7 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 @media (max-width: 900px) {
   .layout { grid-template-columns: clamp(210px, 30vw, 280px) minmax(0, 1fr); }
   main { padding: 16px 16px 72px; }
-  body.rail-hidden main { padding-top: 60px; }   /* clear of the floating toggle */
+  body.rail-hidden main { padding-left: 62px; }  /* the gutter the floating toggle sits in */
   #history, #suggestions { max-height: 55vh; }   /* still capped: a long list is a long scroll */
   .ev { grid-template-columns: 56px 1fr; }
   .ev .ty { grid-column: 2; }
