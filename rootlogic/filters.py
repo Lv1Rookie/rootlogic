@@ -116,6 +116,28 @@ def parse_date(value: str | None, today: date) -> date | None:
     return None
 
 
+# Bare enough to catch a pasted link, strict enough not to swallow the sentence around it.
+_URL = re.compile(r"https?://[^\s<>\"'\]]+", re.I)
+
+
+def urls_in(text: str) -> list[str]:
+    """Links the user typed, in order, without repeats.
+
+    Trailing punctuation is part of the sentence rather than the address: "see https://x.org."
+    ends in a full stop. Brackets are counted rather than banned, because Wikipedia is full of
+    addresses like ``/wiki/Mercury_(planet)``: a closing bracket is only dropped when nothing
+    in the URL opened it, which is the markdown case ``(https://x.org/a)``.
+    """
+    found: list[str] = []
+    for raw in _URL.findall(text or ""):
+        url = raw.rstrip(".,;:!?'\"")
+        while url.endswith(")") and url.count("(") < url.count(")"):
+            url = url[:-1]
+        if url not in found:
+            found.append(url)
+    return found
+
+
 def normalize_url(url: str) -> str:
     """Lowercase host, drop fragment, tracking params, and trailing slash."""
     parts = urlsplit(url.strip())

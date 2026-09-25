@@ -12,16 +12,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import context as ctx
-from . import continuity, verify
+from . import continuity, filters, verify
 from .filters import SourcePolicy
 from .moderation import Blocked, ModerationGate, Moderator, recovery_hint
 from . import prompts
 from .control import Command, Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
-from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
-                     Report, ReportDraft, SubTask, SubTaskDraft)
+from .models import (Analysis, Clarification, Credibility, Finding, FindingDraft, Plan,
+                     PlanDraft, Reflection, Report, ReportDraft, SourceDraft, SubTask,
+                     SubTaskDraft)
+from .search import clip
 from .store import Store
 from .tracing import NullTracer, Tracer
 
@@ -30,6 +33,10 @@ class Aborted(Exception):
     pass
 
 
+
+
+MAX_SEED_LINKS = 3      # links read from the topic; a topic is not a reading list
+SEED_EXCERPT = 2000     # characters of a linked page carried into the prompts
 
 
 @dataclass
@@ -87,6 +94,7 @@ class Orchestrator:
             self.moderation.request(topic)
             self._load_profile()
             self._load_policy()
+            self._seed_links(topic)
             self._continue_from(previous)
             memory = self._recall(topic)
             self._clarify(topic, memory)
@@ -148,6 +156,60 @@ class Orchestrator:
                    f"{len(previous.findings)} earlier finding(s), "
                    f"{len(previous.seen_urls)} source(s) carried over",
                    parent=previous.session_id, findings=len(previous.findings))
+
+    def _search_provider(self):
+        """Whatever the adapters can fetch pages with, or None on Claude's hosted tools."""
+        return getattr(self.worker, "search", None) or getattr(self.llm, "search", None)
+
+    def _seed_links(self, topic: str) -> None:
+        """Read links the user put in the topic, and treat them as sources like any other.
+
+        A pasted URL used to be nothing but words in a prompt: a sub-agent might fetch it or
+        might not, and if it did the page arrived without passing the source rules. Here it is
+        fetched once, up front, through the same filters as anything a sub-agent brings back,
+        and recorded in `sources` so the report can cite it and the log can show it.
+
+        The page is untrusted like any other web content - it goes into the same evidence store
+        the verifier reads, and the researcher prompt already forbids obeying instructions found
+        in fetched text.
+        """
+        links = filters.urls_in(topic)[:MAX_SEED_LINKS]
+        if not links:
+            return
+        drafts = [SourceDraft(url=u, title=u, published="unknown",
+                              publisher=urlsplit(u).netloc, summary="",
+                              key_takeaways=[],
+                              credibility=Credibility(level="medium",
+                                                      reason="chosen by the user, not the model"),
+                              relevance="high")
+                  for u in links]
+        # recency is not applied: the reader asked for this page, whatever its date
+        kept, dropped = filters.filter_sources(
+            drafts, recency_days=0, today=self.today, seen_urls=self.seen_urls,
+            blocked_domains=self.blocked_domains, policy=self.policy)
+        for url, reason in dropped:
+            self.store.add_source(self.sid, "seed", url, kept=False, reason=reason)
+            self._emit("seed.dropped", f"Not reading {url} — {reason}", url=url, reason=reason)
+
+        fetch = verify.page_fetcher(self._search_provider())
+        if kept and fetch is None:
+            # Claude's hosted tools fetch inside the model's own turn, so the link is left for
+            # the sub-agents, who can reach it; saying so beats silently doing nothing.
+            self._emit("seed.deferred",
+                       f"{len(kept)} link(s) from the topic will be read by the sub-agents")
+            return
+        for draft in kept:
+            text = fetch(draft.url)
+            if not text:
+                self.store.add_source(self.sid, "seed", draft.url, kept=False, reason="unreadable")
+                self._emit("seed.unreadable", f"Could not read {draft.url}", url=draft.url)
+                continue
+            self.evidence[filters.normalize_url(draft.url)] = text
+            self.store.add_source(self.sid, "seed", draft.url, title=draft.title,
+                                  credibility=draft.credibility.level, kept=True, reason="from the topic")
+            self.context.append(f"The user linked {draft.url}. Its text begins:\n"
+                                f"{clip(text, SEED_EXCERPT)}")
+            self._emit("seed.fetched", f"Read {draft.url} (linked in the topic)", url=draft.url)
 
     def _recall(self, topic: str) -> list[dict]:
         prior = [p for p in self.store.recall(topic, exclude=self.sid)

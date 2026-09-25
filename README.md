@@ -196,6 +196,12 @@ makes the agent both autonomous and testable, and keeps cost bounded.
   searches per worker. Budget hits are logged, not silent.
 - **Human checkpoints at the cheap moments**: before planning (clarify), before spending
   (plan approval), between waves (override). Workers never block on the user.
+- **A pasted link is a source, not a suggestion.** A URL in the topic used to be nothing but
+  words in a prompt: a sub-agent might fetch it or might not, and if it did, the page arrived
+  without passing the source rules that everything else passes. It is now fetched once before
+  planning, filtered first (so a blocked domain is never reached), recorded in `sources`, and
+  its text put where the verifier can check claims against it. Capped at three, because a topic
+  is a question rather than a reading list.
 - **Salvage a reply before spending another call on it.** Weaker models fail structured output
   in three ways, each seen in live runs: they finish the object and keep talking, they stop
   partway through it, or they hand back the schema they were shown. The adapter takes the first
@@ -298,6 +304,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 | **Claim verification** | Each claim is checked against the text of the pages it cites, captured when sub-agents fetch them or fetched for the check. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. Missing, too-short or unusable page text (navigation, paywall, wrong page) means **unverifiable**, never "unsupported": failing to read a page says nothing about the claim. Claims that fail are withheld from the writer as fact. | model judges, code checks |
 | **Corroboration labels** | *corroborated* (2+ independent sites), *single source*, or *weak* (only low-credibility sources). Low-credibility sources can support a claim but never alone. | code |
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
+| **Links in the topic** | A URL you paste into the topic is read once, up front, and put through the same source rules as anything a sub-agent finds — a blocked domain is never fetched at all. The page is recorded in `sources`, its text goes into the evidence the verifier reads, and an excerpt is given to the planner. It stays untrusted web content: the researcher prompt forbids obeying instructions found in a fetched page. | code decides, model reads |
 | **Report checks** | `[n]` citations pointing at no source become `[?]`. Uncited factual-looking sentences and takeaways citing only low-credibility sources are listed. Every report ends with **Confidence and limitations** and a **Claim check** table. | code |
 | **Refusals** | Claude's safety checks (with server-side fallback) and the other provider's `refusal`/`content_filter` stop harmful requests. | model |
 | **Moderation** (non-Claude) | Screens the request, your mid-run input and the finished report. Harmful requests and reports stop the run (`blocked`); sensitive-but-legitimate flags are noted in the report instead. | model (OpenAI moderation or Llama Guard), code decides |

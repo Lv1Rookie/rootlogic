@@ -97,3 +97,17 @@ def test_outdated_sources_are_dropped_when_dated_rfc_1123():
     old = src("https://old.example/a", published="Mon, 01 Jan 2019 00:00:00 GMT")
     kept, dropped = filter_sources([old], recency_days=365, today=TODAY)
     assert kept == [] and "outdated (2019-01-01" in dropped[0][1]
+
+
+def test_urls_in_reads_links_out_of_a_sentence():
+    """A topic is prose with links in it, not a list of addresses."""
+    from rootlogic.filters import urls_in
+
+    assert urls_in("no links here") == []
+    assert urls_in("see https://x.org/a.") == ["https://x.org/a"]        # the stop is the sentence's
+    assert urls_in("[x](https://y.org/p) end") == ["https://y.org/p"]    # markdown's bracket
+    # Wikipedia is full of these, so brackets are counted rather than banned
+    assert urls_in("see https://en.wikipedia.org/wiki/Mercury_(planet) now") == \
+        ["https://en.wikipedia.org/wiki/Mercury_(planet)"]
+    assert urls_in("a https://e.org b https://e.org") == ["https://e.org"]   # once each
+    assert urls_in("http://a.org, https://b.org.") == ["http://a.org", "https://b.org"]

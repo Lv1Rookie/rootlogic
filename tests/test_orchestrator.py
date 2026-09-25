@@ -472,3 +472,41 @@ def test_a_sub_task_dropped_at_review_is_not_left_pending(tmp_path, kind):
     rows = {t["task_id"]: t["status"] for t in store.tasks(engine.sid)}
     assert rows["t3"] == "skipped", f"dropped task left as {rows['t3']!r}"
     assert rows["t1"] == "done" and rows["t2"] == "done"
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_a_url_in_the_topic_is_fetched_and_filtered_like_any_other_source(tmp_path, kind):
+    """A link pasted into the topic used to be nothing but words in a prompt: a sub-agent might
+    fetch it or might not, and if it did the page skipped the source rules on the way in."""
+    from rootlogic.search import StaticSearch
+
+    from rootlogic.graph import ResearchGraph
+
+    search = StaticSearch(pages={"https://who.int/report": "Hand hygiene guidance from the WHO."})
+    store, ui = Store(), ScriptedUI()
+    llm, kw = FakeLLM(search=search), dict(reports_dir=tmp_path, today=TODAY)
+    orch = (ResearchGraph(llm, store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+            if kind == "graph" else Orchestrator(llm, store, ui, **kw))
+    orch.run("what does https://who.int/report say about hand hygiene")
+
+    assert "https://who.int/report" in search.fetched, "the link should be read, not guessed at"
+    assert "seed.fetched" in ui.types()
+    rows = [s for s in store.sources(orch.sid) if s["url"] == "https://who.int/report"]
+    assert rows and rows[0]["kept"] == 1, "a seed page belongs in the source record"
+    prompts_seen = [p for _, p in llm.calls]
+    assert any("who.int/report" in p for p in prompts_seen), "the planner should see it"
+
+
+def test_a_seed_url_on_a_blocked_domain_is_not_fetched(tmp_path):
+    """The filters judge what sub-agents bring back; a pasted link reached the network first."""
+    from rootlogic.search import StaticSearch
+
+    search = StaticSearch(pages={"https://spam.example/x": "buy things"})
+    store, ui = Store(), ScriptedUI()
+    orch = Orchestrator(FakeLLM(search=search), store, ui, reports_dir=tmp_path, today=TODAY,
+                        blocked_domains=("spam.example",))
+    orch.run("summarise https://spam.example/x please")
+
+    assert "https://spam.example/x" not in search.fetched, \
+        "a blocked domain should not be reached at all"
+    assert "seed.dropped" in ui.types()

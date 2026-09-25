@@ -142,8 +142,10 @@ def default_report(prompt: str) -> ReportDraft:
 
 class FakeLLM:
     def __init__(self, usage_sink: UsageSink | None = None,
-                 handlers: dict[type, Callable[[str], BaseModel]] | None = None):
+                 handlers: dict[type, Callable[[str], BaseModel]] | None = None,
+                 search=None):
         self.usage_sink = usage_sink or (lambda u: None)
+        self.search = search      # the real adapters carry one; code reads it off either
         self.handlers = {Clarification: default_clarify, PlanDraft: default_plan,
                          Reflection: default_reflect, Analysis: default_analysis,
                          ReportDraft: default_report, ProfileUpdate: default_profile,

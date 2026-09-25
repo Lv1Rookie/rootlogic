@@ -32,6 +32,7 @@ import re
 import sqlite3
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Annotated, Any, TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -39,16 +40,18 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 
 from . import context as ctx
-from . import continuity, verify
+from . import continuity, filters, verify
 from .filters import SourcePolicy
 from .moderation import Blocked, ModerationGate, Moderator, recovery_hint
 from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
-from .models import (Analysis, Clarification, Finding, FindingDraft, Plan, PlanDraft, Reflection,
-                     Report, ReportDraft, SearchHit, SubTask, SubTaskDraft)
-from .orchestrator import Budget
+from .models import (Analysis, Clarification, Credibility, Finding, FindingDraft, Plan,
+                     PlanDraft, Reflection, Report, ReportDraft, SearchHit, SourceDraft, SubTask,
+                     SubTaskDraft)
+from .orchestrator import MAX_SEED_LINKS, SEED_EXCERPT, Budget
+from .search import clip
 from .store import Store
 from .tracing import NullTracer, Tracer
 
@@ -211,7 +214,53 @@ class ResearchGraph:
         if line := self._policy().describe():
             update["context"] += [line]
             self._emit("policy.loaded", line)
+        seeds, seen, evidence = self._seed_links(s["topic"], set(update["seen_urls"]))
+        if seeds:
+            update["context"] += seeds
+            update["seen_urls"] = sorted(seen)
+            update["evidence"] = evidence
         return update
+
+    def _seed_links(self, topic: str, seen: set[str]) -> tuple[list[str], set[str], dict[str, str]]:
+        """Read links the user put in the topic. Same rules as the loop engine: see
+        ``Orchestrator._seed_links`` for why a pasted URL is filtered before it is fetched."""
+        links = filters.urls_in(topic)[:MAX_SEED_LINKS]
+        if not links:
+            return [], seen, {}
+        drafts = [SourceDraft(url=u, title=u, published="unknown", publisher=urlsplit(u).netloc,
+                              summary="", key_takeaways=[],
+                              credibility=Credibility(level="medium",
+                                                      reason="chosen by the user, not the model"),
+                              relevance="high")
+                  for u in links]
+        kept, dropped = filters.filter_sources(
+            drafts, recency_days=0, today=self.today, seen_urls=seen,
+            blocked_domains=self.blocked_domains, policy=self._policy())
+        for url, reason in dropped:
+            self.store.add_source(self.sid, "seed", url, kept=False, reason=reason)
+            self._emit("seed.dropped", f"Not reading {url} — {reason}", url=url, reason=reason)
+
+        fetch = verify.page_fetcher(getattr(self.worker, "search", None)
+                                    or getattr(self.llm, "search", None))
+        if kept and fetch is None:
+            self._emit("seed.deferred",
+                       f"{len(kept)} link(s) from the topic will be read by the sub-agents")
+            return [], seen, {}
+        lines, evidence = [], {}
+        for draft in kept:
+            text = fetch(draft.url)
+            if not text:
+                self.store.add_source(self.sid, "seed", draft.url, kept=False, reason="unreadable")
+                self._emit("seed.unreadable", f"Could not read {draft.url}", url=draft.url)
+                continue
+            evidence[filters.normalize_url(draft.url)] = text
+            self.store.add_source(self.sid, "seed", draft.url, title=draft.title,
+                                  credibility=draft.credibility.level, kept=True,
+                                  reason="from the topic")
+            lines.append(f"The user linked {draft.url}. Its text begins:\n"
+                         f"{clip(text, SEED_EXCERPT)}")
+            self._emit("seed.fetched", f"Read {draft.url} (linked in the topic)", url=draft.url)
+        return lines, seen, evidence
 
     def clarify(self, s: ResearchState) -> dict:
         self._emit("clarify.started", "Checking whether the topic needs clarification")
