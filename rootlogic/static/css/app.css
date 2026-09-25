@@ -155,8 +155,12 @@ main {
   border-bottom: 1px solid var(--line-soft);
 }
 .brand svg { flex: none; filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--accent) 35%, transparent)); }
+.brand > div { min-width: 0; flex: 1 1 0; }     /* the name gives way before the controls do */
 .brand b { font-size: 17px; letter-spacing: -.015em; }
-.brand span { color: var(--muted); font-size: 12px; letter-spacing: .01em; }
+.brand span {
+  color: var(--muted); font-size: 12px; letter-spacing: .01em;
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ---------------------------------------------------------------- hiding the sidebar
  * Wide enough, the sidebar is a column beside the page and folds away to give the report the
@@ -422,12 +426,21 @@ label.inline:hover { color: var(--ink); }
  * also what makes it sit on top of the report. It folds away to a single line, leaving the
  * status pill so a run is never silently out of sight, and the same chevron the sidebar
  * sections use to say so. */
-.statusbar-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The head has to be able to give: its children are a chevron, a title of any length, a
+ * status pill and a menu, and a flex item is as wide as its contents unless told otherwise.
+ * Without `min-width: 0` on the parts that can shrink they simply overlap each other. */
+.statusbar-head {
+  display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 340px; flex-wrap: wrap;
+}
+/* basis 0, so the title shrinks to the room left beside the chevron instead of wrapping
+ * underneath it and leaving the chevron alone on a line of its own */
+.statusbar-head > div { min-width: 0; flex: 1 1 0; }
+.statusbar .topic { min-width: 0; overflow-wrap: break-word; }
 /* Reaching a panel under a long report meant scrolling past the report. This says where to
  * go, and it lives in the head so that folding the bar away does not take it too. */
 .jump {
-  width: auto; min-width: 120px; max-width: 200px; height: 34px; min-height: 0;
-  font-size: 13px; padding: 4px 28px 4px 10px; border-radius: var(--r-sm); flex: none;
+  width: auto; min-width: 110px; max-width: 200px; height: 34px; min-height: 0;
+  font-size: 13px; padding: 4px 28px 4px 10px; border-radius: var(--r-sm); flex: 0 1 auto;
   background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
 }
 .bar-toggle {
@@ -670,6 +683,12 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
   .layout { grid-template-columns: minmax(0, 1fr); }
   body:not(.rail-hidden) .layout { grid-template-columns: minmax(180px, 46vw) minmax(0, 1fr); }
   .brand { position: static; backdrop-filter: none; }
+  /* Four things do not fit on one line here, so the menu takes its own rather than being
+   * squeezed on top of the title. */
+  .jump { flex: 1 1 100%; max-width: none; }
+  .statusbar { padding: 12px; }
+  body.rail-hidden main { padding-left: 54px; }
+  .statusbar .topic { font-size: 17px; }
 }
 @media (max-width: 560px) {
   .composer-bar { flex-direction: column; align-items: stretch; }
