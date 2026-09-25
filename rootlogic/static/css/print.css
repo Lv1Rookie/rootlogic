@@ -10,27 +10,23 @@
   margin: 22mm 20mm 20mm;
 }
 
-/* Everything that isn't the report disappears: sidebar, tabs, controls, live views. */
-aside,
-.tabs,
-#stages,
-#agents,
-#steer,
-#steer-note-out,
-#plan-panel,
-#cards,
-#continue,
-#tab-log,
-#tab-usage,
-.report-actions,
-.uiv-top,
-.uiv-loader-slot,
-.uiv-loader-caption,
-#welcome,
-.view-head .btn,
-#v-status {
+/* Everything that isn't the report disappears.
+ *
+ * Stated as "keep the report, drop the rest" rather than as a list of things to drop. The
+ * list version printed whatever was added to the page afterwards: the composer arrived in
+ * the main column and printed itself onto page one of every report, above the title.
+ */
+aside,                              /* the whole sidebar */
+main > *:not(#view),                /* the composer, the welcome panel */
+#view > *:not(#result-panel),       /* status bar, request cards, follow-up, progress, plan */
+#result-panel > *:not(#tab-report), /* the tab strip, the action log, the usage table */
+#tab-report > *:not(#report-body),  /* the download row */
+.uiv-top {                          /* fixed to the viewport, so outside the layout */
   display: none !important;
 }
+
+/* the title block is inserted before #report-body, so it is named rather than kept by shape */
+#print-title { display: block !important; }
 
 html, body {
   background: #fff !important;

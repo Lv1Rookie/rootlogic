@@ -476,3 +476,22 @@ def test_static_files_are_revalidated_not_assumed_fresh(client):
         r = client.get(path)
         assert r.status_code == 200, path
         assert r.headers.get("cache-control") == "no-cache", (path, r.headers)
+
+
+def test_print_keeps_the_report_and_drops_the_rest_by_default():
+    """The PDF came out with the composer printed above the title. The print stylesheet had
+    listed what to hide, so anything added to the page afterwards printed itself - the
+    composer moved into the main column and joined every report. It now states what to keep."""
+    from pathlib import Path
+    static = Path(__file__).resolve().parents[1] / "rootlogic" / "static"
+    css = (static / "css" / "print.css").read_text()
+    html = (static / "index.html").read_text()
+
+    assert 'id="result-panel"' in html, "the print rules hang off this panel"
+    for rule in ("main > *:not(#view)",
+                 "#view > *:not(#result-panel)",
+                 "#result-panel > *:not(#tab-report)",
+                 "#tab-report > *:not(#report-body)"):
+        assert rule in css, f"print.css should keep only the report: missing {rule}"
+    assert "#print-title { display: block" in css, \
+        "the title page is a sibling of the report body, so it needs saying"
