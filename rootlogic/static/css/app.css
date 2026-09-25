@@ -531,6 +531,12 @@ td.id {
  * out of the panel it scrolls inside it. */
 #tab-usage { overflow-x: auto; }
 #tab-usage table { min-width: 460px; }
+
+/* The report's claim-check table has the same problem and needed the same answer: four
+ * columns, of which Corroboration and Sources sat outside the panel on a narrow window with
+ * no way to reach them - the reader could see that a claim had been checked but not what the
+ * verdict was. Only the table scrolls, not the prose around it, which wraps perfectly well. */
+#tab-report table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
 tr.dropped td { opacity: .45; text-decoration: line-through; }
 tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 600; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
