@@ -418,6 +418,11 @@ class ResearchGraph:
             evidence.update(verify.evidence_from_hits(hits))
             policy_drops += sum(1 for _, r in finding.dropped
                                 if "your source rules" in r or "your allowlist" in r)
+            if finding.relaxed_recency:
+                self._emit("filter.relaxed",
+                           f"[{task.id}] Every source was the newer-than rule's only casualty, "
+                           f"so the {plan.recency_days}-day window was set aside for this "
+                           f"sub-task", task=task.id, recency_days=plan.recency_days)
             for url, reason in finding.dropped:
                 self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
                 self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}",

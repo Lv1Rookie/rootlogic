@@ -270,6 +270,7 @@ class Finding(BaseModel):
     confidence: str
     dropped: list[tuple[str, str]] = []  # (url, reason) removed by source filters
     checks: list[CheckedClaim] = []      # filled by verify.verify_findings
+    relaxed_recency: bool = False        # the age rule took everything, so it was set aside
 
 
 class ReportQuality(BaseModel):

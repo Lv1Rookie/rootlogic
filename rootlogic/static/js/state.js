@@ -9,6 +9,7 @@ import { resetStages } from "./stages.js";
 import { resetAgents } from "./agents.js";
 import { resetSteer } from "./steer.js";
 import { clearReport } from "./export.js";
+import { resetLog } from "./log.js";
 import { refreshOutline } from "./outline.js";
 
 export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
@@ -62,6 +63,7 @@ export function resetView(topic) {
   resetAgents();
   resetSteer();
   $("#tab-log").innerHTML = "";
+  resetLog();                       // a fresh view follows the newest line again
   $("#report-body").innerHTML = waitingMarkup;
   clearReport();
   $("#tab-usage").innerHTML = `<div class="empty">Usage appears when the session ends.</div>`;

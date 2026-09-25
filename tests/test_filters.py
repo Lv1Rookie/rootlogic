@@ -111,3 +111,56 @@ def test_urls_in_reads_links_out_of_a_sentence():
         ["https://en.wikipedia.org/wiki/Mercury_(planet)"]
     assert urls_in("a https://e.org b https://e.org") == ["https://e.org"]   # once each
     assert urls_in("http://a.org, https://b.org.") == ["http://a.org", "https://b.org"]
+
+
+def test_the_age_window_gives_way_when_it_would_take_every_source():
+    """Live on walking and type 2 diabetes: the planner picked 730 days, and one sub-task lost
+    all three of its sources for being a few months too old - peer-reviewed 2024 papers from
+    PubMed and the BJSM - while a 2023 PDF survived because its date would not parse. The
+    window is a guess made before any source is seen; when it is the only thing that removed
+    everything, it was the guess that was wrong."""
+    from datetime import date
+
+    from rootlogic.context import curate
+    from rootlogic.models import Credibility, FindingDraft, SubTask
+
+    def source(url, published):
+        return SourceDraft(url=url, title="t", published=published, publisher="p", summary="s",
+                           key_takeaways=[], relevance="high",
+                           credibility=Credibility(level="high", reason="peer reviewed"))
+
+    task = SubTask(id="t1", question="q", rationale="r", search_queries=[])
+    draft = FindingDraft(answer="a", claims=[], gaps=[], confidence="medium", sources=[
+        source("https://pubmed.ncbi.nlm.nih.gov/38050034", "2024-01-01"),
+        source("https://bjsm.bmj.com/content/58/6/334", "2024-01-01")])
+
+    finding = curate(task, draft, [], recency_days=730, today=date(2026, 9, 25), seen_urls=set())
+
+    assert [s.url for s in finding.sources] == [
+        "https://pubmed.ncbi.nlm.nih.gov/38050034", "https://bjsm.bmj.com/content/58/6/334"]
+    assert finding.relaxed_recency, "the run should say it set its own rule aside"
+    assert not finding.dropped
+
+
+def test_the_age_window_stands_when_something_else_survived():
+    """Relaxing is for a rule that took everything, not for a rule that did its job."""
+    from datetime import date
+
+    from rootlogic.context import curate
+    from rootlogic.models import Credibility, FindingDraft, SubTask
+
+    def source(url, published):
+        return SourceDraft(url=url, title="t", published=published, publisher="p", summary="s",
+                           key_takeaways=[], relevance="high",
+                           credibility=Credibility(level="high", reason="r"))
+
+    task = SubTask(id="t1", question="q", rationale="r", search_queries=[])
+    draft = FindingDraft(answer="a", claims=[], gaps=[], confidence="medium", sources=[
+        source("https://old.example/a", "2019-01-01"),
+        source("https://new.example/b", "2026-09-01")])
+
+    finding = curate(task, draft, [], recency_days=365, today=date(2026, 9, 25), seen_urls=set())
+
+    assert [s.url for s in finding.sources] == ["https://new.example/b"]
+    assert not finding.relaxed_recency
+    assert finding.dropped and "outdated" in finding.dropped[0][1]

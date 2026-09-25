@@ -24,7 +24,11 @@ Each sub-task is a question a researcher can answer with web search. Cover diffe
 criticism or opposing views). Order by importance. Use depends_on only when a sub-task truly
 needs another's result first.
 Pick recency_days from the nature of the topic: fast-moving news or technology ~180-365,
-policy/markets ~730, stable science or history 0 (age irrelevant).
+policy/markets ~730, stable science or history 0 (age irrelevant). Ask what an old source would
+get WRONG, not whether it is old: medical, scientific and historical evidence usually ages
+slowly, and a landmark trial or meta-analysis stays the best answer for years, so prefer 0 there
+even when recent work exists. Use a window only where staleness makes a source misleading -
+prices, officeholders, product capabilities, live events.
 If prior research by this user is provided, build on it instead of repeating it.
 If earlier research in this thread is provided, this is a follow-up: plan only sub-tasks that add
 something new (the follow-up request, open gaps, newer developments). Never re-research a

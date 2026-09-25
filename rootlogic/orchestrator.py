@@ -336,6 +336,11 @@ class Orchestrator:
         self.evidence.update(verify.evidence_from_hits(hits))
         self.policy_drops += sum(1 for _, r in dropped if "your source rules" in r
                                  or "your allowlist" in r)
+        if finding.relaxed_recency:
+            self._emit("filter.relaxed",
+                       f"[{task.id}] Every source was newer-than rule's only casualty, so the "
+                       f"{plan.recency_days}-day window was set aside for this sub-task",
+                       task=task.id, recency_days=plan.recency_days)
         for url, reason in dropped:
             self.store.add_source(self.sid, task.id, url, kept=False, reason=reason)
             self._emit("source.dropped", f"[{task.id}] Dropped {url} — {reason}", task=task.id)

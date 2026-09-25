@@ -109,6 +109,20 @@ def curate(task: SubTask, draft: FindingDraft, hits: list[SearchHit], *, recency
     kept, dropped = filter_sources(draft.sources, recency_days=recency_days, today=today,
                                    seen_urls=seen_urls, blocked_domains=blocked_domains,
                                    policy=policy)
+
+    # The window is a guess the planner makes before any source has been seen, and a wrong
+    # guess is otherwise unrecoverable: a live run on walking and type 2 diabetes set 730 days
+    # and threw away peer-reviewed 2024 papers from PubMed and the BJSM, leaving one sub-task
+    # with nothing at all - while a 2023 PDF survived because its date would not parse, so
+    # declaring a date was the thing being punished. When age is the only thing that removed
+    # every source, the window was wrong for this question rather than the sources being bad.
+    relaxed = False
+    if recency_days and not kept and dropped and all(r.startswith("outdated") for _, r in dropped):
+        relaxed = True
+        kept, dropped = filter_sources(draft.sources, recency_days=0, today=today,
+                                       seen_urls=seen_urls, blocked_domains=blocked_domains,
+                                       policy=policy)
+
     return Finding(task_id=task.id, question=task.question, answer=draft.answer, sources=kept,
                    claims=draft.claims, gaps=draft.gaps, confidence=draft.confidence,
-                   dropped=dropped)
+                   dropped=dropped, relaxed_recency=relaxed)

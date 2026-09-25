@@ -511,6 +511,14 @@ td.id {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
   color: var(--muted); width: 1%; white-space: nowrap;
 }
+/* A sub-task question is a sentence, and a table column will happily be as wide as the
+ * longest word in it unless told the cell may break. */
+#plan-rows td { overflow-wrap: anywhere; }
+
+/* The usage table is six numeric columns that cannot usefully shrink, so rather than spill
+ * out of the panel it scrolls inside it. */
+#tab-usage { overflow-x: auto; }
+#tab-usage table { min-width: 460px; }
 tr.dropped td { opacity: .45; text-decoration: line-through; }
 tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 600; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -646,7 +654,10 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 }
 .stage-sep { color: var(--line); font-size: 11px; }
 
-.agents { display: grid; gap: 9px; margin-top: 12px; }
+/* A grid item is min-width:auto by default, which means "never narrower than my contents" -
+ * so a long question or a long URL made the card wider than the panel holding it. */
+.agents { display: grid; gap: 9px; margin-top: 12px; grid-template-columns: minmax(0, 1fr); }
+.agents .agent { min-width: 0; }
 .agent {
   border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-sm);
   padding: 10px 12px; background: var(--panel-2);
@@ -656,16 +667,22 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 .agent.done { border-left-color: var(--accent-line); }
 .agent.failed { border-left-color: var(--bad); background: var(--bad-soft); }
 .agent.skipped { opacity: .6; }
-.agent-head { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; }
+.agent-head { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
 .agent-head .id {
   font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--muted); flex: none;
 }
-.agent-head .q { flex: 1; min-width: 200px; font-size: 14px; line-height: 1.45; }
+/* 200px is wider than the whole panel on a narrow window, and a flex item that cannot
+ * shrink pushes its card past the edge. */
+.agent-head .q { flex: 1 1 0; min-width: 0; font-size: 14px; line-height: 1.45; }
 .agent .steps {
   list-style: none; margin: 9px 0 0; padding: 0; display: grid; gap: 4px;
   font-size: 12px; color: var(--muted);
 }
-.agent .steps .what { word-break: break-word; }
+.agent .steps { min-width: 0; }
+.agent .steps li { min-width: 0; }
+/* a search query has spaces to break at; a URL does not, so it needs permission to break
+ * anywhere or it sets the width of the card it sits in */
+.agent .steps .what { overflow-wrap: anywhere; }
 .agent .steps li::before { content: "› "; color: var(--faint); }
 
 #steer { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
