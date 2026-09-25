@@ -318,7 +318,11 @@ rootlogic research --provider openai --base-url http://localhost:20128/v1 --mode
 - Claude-only features don't apply: `--zdr`, effort levels, and server-side refusal fallback.
   Refusals and content filtering from the other provider are still detected and reported.
 - **Moderation is required, because an arbitrary model may have no safety system.** With
-  `OPENAI_API_KEY` set, OpenAI's free moderation endpoint is used automatically. Fully local?
+  `OPENAI_API_KEY` set to a key for OpenAI's *own* API, its free moderation endpoint is used
+  automatically. A key belonging to someone else — OpenRouter's `sk-or-…`, Anthropic's
+  `sk-ant-…` — is refused at startup rather than at the first call: that endpoint rejects it,
+  and a moderator that 401s is not a moderator. Seen live, where it failed every run at the
+  clarify step while appearing to be switched on. Fully local?
   `ollama pull llama-guard3` and `--moderation llama-guard`. To run unscreened, say so:
   `--moderation none`. `--moderation-strict` blocks on every flag, not only harm-enabling ones.
   If the moderation service can't be reached, the run stops rather than continuing unscreened.
@@ -347,7 +351,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
 | **Links in the topic** | A URL you paste into the topic is read once, up front, and put through the same source rules as anything a sub-agent finds — a blocked domain is never fetched at all. The page is recorded in `sources`, its text goes into the evidence the verifier reads, and an excerpt is given to the planner. It stays untrusted web content: the researcher prompt forbids obeying instructions found in a fetched page. | code decides, model reads |
 | **Report checks** | `[n]` citations pointing at no source become `[?]`. Uncited factual-looking sentences and takeaways citing only low-credibility sources are listed. Every report ends with **Confidence and limitations** and a **Claim check** table. | code |
-| **Refusals** | Claude's safety checks (with server-side fallback) and the other provider's `refusal`/`content_filter` stop harmful requests. | model |
+| **Refusals** | Claude's safety checks (with server-side fallback) and the other provider's `refusal`/`content_filter` stop harmful requests. A model that declines by planning nothing is treated the same way: an empty plan on a fresh topic ends the run as `refused`, rather than as a search that found no sources. **Through an OpenAI-compatible gateway a refusal may not survive the hop** — see below. | model |
 | **Moderation** (non-Claude) | Screens the request, your mid-run input and the finished report. Harmful requests and reports stop the run (`blocked`); sensitive-but-legitimate flags are noted in the report instead. | model (OpenAI moderation or Llama Guard), code decides |
 
 **Proof: the evaluation set.** [`evals/cases.json`](evals/cases.json) holds 20 cases: known
@@ -364,6 +368,18 @@ Results go to `evals/results/*.json`. `--baseline <file>` shows what changed sin
 run. `--offline` exercises the harness for free; offline scores are meaningless, because the
 fake model knows no facts and never refuses. Two caveats: the hoax judge is the same model unless
 you configure otherwise, and a live run costs roughly one research session per case.
+
+**A refusal can be lost in transit.** Against the Anthropic API, a declined request arrives as
+`stop_reason: "refusal"` and is scored as one. Through an OpenAI-compatible gateway it may
+instead come back as an HTTP 502 — one live gateway answered a nerve-agent synthesis request
+with `upstream_empty_response`, "upstream returned an empty response without usable output".
+That is indistinguishable from the gateway being down, and 502 is a status worth retrying, so
+rootlogic retries it and reports a failed run. **The request is still refused** — no research
+runs and nothing is written — but `rootlogic eval` scores the case as failed rather than
+refused, because from inside the process the two are the same event. Deliberately not
+special-cased: reading every `upstream_empty_response` as a refusal would mark real outages
+safe, which is the more dangerous mistake. Score the harmful cases against the Anthropic API
+directly, or read the run's events.
 
 ## Memory that improves research
 

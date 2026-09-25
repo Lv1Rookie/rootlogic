@@ -531,6 +531,8 @@ Honest limits to explain in a demo:
 - Unverifiable claims are common when subagents don't fetch pages.
 - The hoax judge is a model too.
 - A live evaluation costs money.
+- Harmful cases cannot be scored through an OpenAI-compatible gateway, which can turn a refusal
+  into a transport error (Step 19). Score those against the Anthropic API.
 
 ## Step 19: Screening content for models without safety systems → [`moderation.py`](../rootlogic/moderation.py)
 
@@ -560,9 +562,46 @@ The judgement call worth explaining in a demo: a research tool for journalists m
   continuing unscreened.
 - **No silent default:** a non-Claude model with no moderation available refuses to start and
   explains the three options, rather than quietly running unscreened.
+- **A key for someone else's API is not moderation.** `OPENAI_API_KEY` holding an OpenRouter
+  key (`sk-or-…`) satisfied "is it set?", so `auto` chose OpenAI moderation, and every call
+  401ed at the clarify step. Each run died looking like a model failure while the screening
+  that was supposedly switched on had never run once. Foreign keys are now recognised at
+  startup, which is the only honest place to find out.
 
 The evaluation harness counts a moderation block as a refusal, so the harmful cases pass either
 way: the model refuses, or moderation stops it.
+
+### A refusal has to survive the transport
+
+The first live evaluation scored the two harmful-request cases 0/2, and neither score was
+true. Both requests had been refused; the harness could not see it.
+
+**One refusal arrived as a plan.** The planner answered with the objective "Decline to provide
+research assistance for this request" and no sub-tasks, and a plan with nothing in it took the
+`_nothing_found` path - a report titled "No sources found". That describes a search that came
+up empty, which is not what happened: nothing was searched, because the model said no. An
+empty plan on a fresh topic now raises `AgentRefusal`, and a refusal is recorded as its own
+session status. It had been stored as `failed`, which reads like the tool broke.
+
+**The other refusal was destroyed in transit, and that one stays unfixed.** Against the
+Anthropic API a declined request arrives as `stop_reason: "refusal"`. Through the
+OpenAI-compatible gateway the same request came back as:
+
+```
+502 upstream_response_error
+[claude/claude-sonnet-5] upstream returned an empty response without usable output
+```
+
+A 502 is worth retrying, and `upstream_empty_response` is exactly what a gateway says when its
+upstream is having a bad minute - so rootlogic retries and reports a failed run, which is the
+right behaviour for a 502. The request *is* refused: no research runs, nothing is written. But
+from inside the process, "the model declined" and "the gateway is down" are the same event.
+
+The tempting fix is to read `upstream_empty_response` as a refusal, and it is worse than the
+bug: it would mark real outages safe. A guardrail that reports success when it cannot see is
+the one failure mode that must not happen, so this case is documented as unscoreable through a
+gateway rather than made green. **Some guarantees are properties of the transport, not of your
+code**, and the honest move is to say which ones.
 
 ## Step 20: Check it, then publish
 
@@ -585,7 +624,7 @@ Every change went through the same routine:
 ## Step 21: Run it for real, on a laptop, for free
 
 176 mocked tests passed before the first live run. Then every real run broke something new.
-Eighteen defects came out of live testing, none of them reachable by the test suite as it stood,
+Twenty defects came out of live testing, none of them reachable by the test suite as it stood,
 and each one is now covered by a test that fails against the old code.
 
 | What broke | Why the tests missed it | Fix |
@@ -608,6 +647,8 @@ and each one is now covered by a test that fails against the old code.
 | Seven of twelve fetches were gov.uk URLs the model had composed | StaticSearch answers any URL you ask it for | refuse a fetch of a URL no search returned |
 | Every gov.uk document stayed out of reach, so the run cited trade press and social posts | fixtures hand back whatever source the test wants | let a search be restricted to a publisher's site |
 | Facebook and Instagram posts carried government deadlines at the model's own credibility rating | no fixture cites a social post | rate those platforms low by default |
+| A declined request was reported as a search that found no sources | the fake planner always returns sub-tasks | an empty plan on a fresh topic is a refusal |
+| Moderation was configured, authenticated with someone else's key, and 401ed every run | tests inject a moderator rather than resolving one from the environment | reject a foreign key at startup |
 
 Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
 path — a graded requirement, passing its unit tests, doing nothing in production, because
