@@ -7,6 +7,7 @@ import pytest
 from rootlogic import prompts
 from rootlogic.fake_llm import FakeLLM
 from rootlogic.graph import ResearchGraph
+from rootlogic.llm import LLMError
 from rootlogic.orchestrator import Orchestrator
 from rootlogic.prompts import EDITABLE, PromptSet
 from rootlogic.store import Store
@@ -128,3 +129,66 @@ def test_a_stock_run_records_no_prompts(tmp_path):
     engine = Orchestrator(FakeLLM(), store, ScriptedUI(), reports_dir=tmp_path, today=TODAY)
     engine.run("impact of generative AI on newsrooms")
     assert store.session_prompts(engine.sid) == {}
+
+
+def test_a_resumed_run_says_which_prompts_it_is_using(tmp_path):
+    """The leg that finishes a report can be started with different prompts from the leg that
+    began it, and the report's numbers were produced by both."""
+    from rootlogic.fake_llm import default_analysis
+    from rootlogic.models import Analysis
+
+    store = Store(tmp_path / "rl.db")
+    cp = tmp_path / "cp.db"
+    state = {"fail": True}
+
+    def flaky(prompt):
+        if state["fail"]:
+            raise LLMError("network down")
+        return default_analysis(prompt)
+
+    first = ResearchGraph(FakeLLM(handlers={Analysis: flaky}), store, ScriptedUI(),
+                          checkpoint_path=cp, reports_dir=tmp_path, today=TODAY,
+                          prompt_set=PromptSet.from_overrides({"verifier": "Be strict."}))
+    with pytest.raises(LLMError):
+        first.run("impact of generative AI on newsrooms")
+    sid = first.sid
+
+    # Resumed with a different prompt rewritten, and the verifier left at its default.
+    state["fail"] = False
+    ui = ScriptedUI()
+    second = ResearchGraph(FakeLLM(handlers={Analysis: flaky}), store, ui, checkpoint_path=cp,
+                           reports_dir=tmp_path, today=TODAY,
+                           prompt_set=PromptSet.from_overrides({"writer": "Be brief."}))
+    report = second.resume(sid)
+
+    assert "prompt.custom" in ui.types()      # the resumed leg says so too
+    assert "prompt.changed" in ui.types()     # ...and that the prompts are not the same ones
+    # The report was produced by both legs, so it discloses both.
+    assert report.quality.custom_prompts == ["verifier", "writer"]
+    assert set(store.session_prompts(sid)) == {"verifier", "writer"}
+
+
+def test_a_resumed_stock_run_stays_quiet(tmp_path):
+    from rootlogic.fake_llm import default_analysis
+    from rootlogic.models import Analysis
+
+    store = Store(tmp_path / "rl.db")
+    cp = tmp_path / "cp.db"
+    state = {"fail": True}
+
+    def flaky(prompt):
+        if state["fail"]:
+            raise LLMError("network down")
+        return default_analysis(prompt)
+
+    kw = dict(checkpoint_path=cp, reports_dir=tmp_path, today=TODAY)
+    first = ResearchGraph(FakeLLM(handlers={Analysis: flaky}), store, ScriptedUI(), **kw)
+    with pytest.raises(LLMError):
+        first.run("impact of generative AI on newsrooms")
+
+    state["fail"] = False
+    ui = ScriptedUI()
+    report = ResearchGraph(FakeLLM(handlers={Analysis: flaky}), store, ui, **kw).resume(first.sid)
+
+    assert "prompt.custom" not in ui.types() and "prompt.changed" not in ui.types()
+    assert report.quality.custom_prompts == []

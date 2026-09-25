@@ -241,9 +241,10 @@ class Step(BaseModel):
 
 
 Verdict = Literal["supported", "partially_supported", "unsupported", "unverifiable", "unchecked"]
-# Why a claim could not be checked: the page wouldn't read, or the claim isn't checkable at all
-# (an opinion, a prediction). VeriScore separates these; collapsing them blames the fetcher.
-UnverifiableReason = Literal["", "page_unreadable", "not_a_factual_claim"]
+# Why a claim could not be checked: the page wouldn't read, the claim isn't checkable at all
+# (an opinion, a prediction), or it named no source to check against. VeriScore separates
+# these; collapsing them blames the fetcher for a claim that never cited a page.
+UnverifiableReason = Literal["", "page_unreadable", "not_a_factual_claim", "no_sources_cited"]
 Corroboration = Literal["corroborated", "single_source", "weak", "none"]
 
 
@@ -285,7 +286,7 @@ class ReportQuality(BaseModel):
     moderation_warnings: list[str] = []      # sensitive-content flags that didn't block
     moderation_provider: str = ""
 
-    unverifiable_reasons: dict[str, int] = {}   # page_unreadable / not_a_factual_claim -> count
+    unverifiable_reasons: dict[str, int] = {}   # reason -> count (see UnverifiableReason)
 
     @property
     def unverifiable_detail(self) -> str:
@@ -293,7 +294,8 @@ class ReportQuality(BaseModel):
         opinion that no page could settle."""
         parts = [(n, label) for key, label in
                  (("page_unreadable", "page text unavailable"),
-                  ("not_a_factual_claim", "not a checkable claim"))
+                  ("not_a_factual_claim", "not a checkable claim"),
+                  ("no_sources_cited", "no source cited"))
                  if (n := self.unverifiable_reasons.get(key, 0))]
         return ", ".join(f"{n} {label}" for n, label in parts)
 

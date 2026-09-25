@@ -572,3 +572,24 @@ def test_fetch_budget_follows_the_claim_budget():
     verify_findings([finding("t2", claims, [src(f"https://a.gov/{i}") for i in range(20)])],
                     llm=llm, evidence={}, fetch=fetch, max_claims=8)
     assert len(fetched) == FETCH_FLOOR              # small budgets keep the floor, not half
+
+
+def test_a_claim_citing_nothing_is_not_blamed_on_the_page():
+    """"page text unavailable" sent the reader looking for a fetch problem behind a claim that
+    never named a page."""
+    f = finding("t1", [("Unemployment fell to 3.9% in 2025", []),
+                       ("Wages rose", ["https://a.gov/r"])], [src("https://a.gov/r")])
+    llm = FakeLLM(handlers=verdicts((2, "supported", "Unemployment fell to 3.9 percent in 2025")))
+    verify_findings([f], llm=llm, evidence={"https://a.gov/r": PAGE})
+
+    nothing_cited, cited = f.checks
+    assert nothing_cited.verdict == "unverifiable"
+    assert nothing_cited.unverifiable_reason == "no_sources_cited"
+    assert "cites no source" in nothing_cited.note
+    assert cited.verdict != "unverifiable"
+
+
+def test_unverifiable_detail_names_the_uncited_claim():
+    from rootlogic.models import ReportQuality
+    q = ReportQuality(unverifiable_reasons={"page_unreadable": 2, "no_sources_cited": 1})
+    assert q.unverifiable_detail == "2 page text unavailable, 1 no source cited"

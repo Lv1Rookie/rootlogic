@@ -208,10 +208,16 @@ def verify_findings(findings: list[Finding], *, llm: LLM, evidence: dict[str, st
                     pages[url] = evidence[key]   # too short to be real content: not evidence
             if pages:
                 to_judge.append((i + 1, check, pages))
-            else:
+            elif check.source_urls:
                 check.verdict = "unverifiable"
                 check.unverifiable_reason = "page_unreadable"
                 check.note = "No usable page text for the cited sources."
+            else:
+                # Nothing was cited, so nothing failed to read: "page text unavailable" sent
+                # the reader looking for a fetch problem behind a claim that named no page.
+                check.verdict = "unverifiable"
+                check.unverifiable_reason = "no_sources_cited"
+                check.note = "The claim cites no source to check it against."
         if to_judge:
             _judge(f, to_judge, llm, result, emit, verifier)
         for check in checks:

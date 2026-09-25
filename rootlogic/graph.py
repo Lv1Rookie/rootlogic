@@ -521,7 +521,7 @@ class ResearchGraph:
         sources = ctx.all_sources(findings)
         checks = [c for f in findings for c in f.checks]
         quality = verify.check_report(draft, sources, checks, s.get("policy_drops", 0),
-                                      self.prompts.customised)
+                                      self.session_prompt_names())
         report = Report(session_id=self.sid, draft=draft, sources=sources, analysis=analysis,
                         checks=checks, quality=quality)
         self._emit("report.checked",
@@ -639,16 +639,36 @@ class ResearchGraph:
             self._emit(type_, message, **data)
         return report
 
-    def _announce_prompts(self) -> None:
+    def _announce_prompts(self, *, resumed: bool = False) -> None:
         """Say up front which prompts were rewritten: the log is the record of what produced
-        this report, and a custom verifier or writer changes what its numbers mean."""
-        custom = self.prompts.customised
-        self.store.record_session_prompts(
-            self.sid, {name: getattr(self.prompts, name) for name in custom})
+        this report, and a custom verifier or writer changes what its numbers mean.
+
+        A resumed session says it again, because the leg that finishes a report can be started
+        with different prompts from the leg that began it - and a resume that quietly recorded
+        only its own prompts would have erased the record of the first half. The session keeps
+        the union, and a prompt that changed between legs is called out: the report's numbers
+        were produced by both.
+        """
+        custom = {name: getattr(self.prompts, name) for name in self.prompts.customised}
+        changed: list[str] = []
+        if resumed:
+            earlier = self.store.session_prompts(self.sid)
+            changed = sorted(k for k in set(earlier) | set(custom)
+                             if earlier.get(k) != custom.get(k))
+            custom = {**earlier, **custom}
+        self.store.record_session_prompts(self.sid, custom)
         if custom:
             self._emit("prompt.custom", "Custom system prompt(s) in use: "
-                       + ", ".join(custom) + " — noted in the report",
-                       prompts=list(custom))
+                       + ", ".join(sorted(custom)) + " — noted in the report",
+                       prompts=sorted(custom))
+        if changed:
+            self._emit("prompt.changed", "Resumed with different prompt(s): "
+                       + ", ".join(changed) + " — this report was produced by both",
+                       prompts=changed)
+
+    def session_prompt_names(self) -> tuple[str, ...]:
+        """Every prompt rewritten anywhere in this session, for the report's own record."""
+        return tuple(sorted(self.store.session_prompts(self.sid)))
 
     def _emit(self, type_: str, message: str, **data) -> None:
         if self.sid:
@@ -694,6 +714,7 @@ class ResearchGraph:
             return self._report(state.values)
         self.store.update_session(self.sid, status="running")
         self._emit("session.resumed", f"Resuming at: {', '.join(state.next) or 'start'}")
+        self._announce_prompts(resumed=True)
         if any(i.value.get("kind") == "override" for i in state.interrupts):
             self.control.request_pause()  # restore the flag the interrupted node checks
         return self._drive(None)
