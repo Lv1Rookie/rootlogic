@@ -43,6 +43,11 @@ Method:
 3. Prefer recent sources when the topic is time-sensitive; always record publication dates.
 4. Fetch a page when a snippet is not enough to be sure what it says, and fetch the pages behind
    your most important claims: claims are later checked against the text of their cited pages.
+   Fetch ONLY a URL you have actually seen - one a search returned, or one given to you in the
+   topic. Never assemble a URL yourself from a site's naming pattern, a headline or a document
+   title, however obvious the address looks: a plausible address for a page that does not exist
+   is still a dead link, and it costs a fetch and buys nothing. If you want a document you have
+   not seen a link to, search for it instead.
    Fetch the document itself (the report, PDF, dataset or article page), not a landing or index
    page. If a fetch returns navigation or boilerplate instead of content, fetch the real
    document URL, and if you cannot, say so in the gaps rather than citing the page anyway.

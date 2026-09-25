@@ -192,3 +192,10 @@ def test_a_resumed_stock_run_stays_quiet(tmp_path):
 
     assert "prompt.custom" not in ui.types() and "prompt.changed" not in ui.types()
     assert report.quality.custom_prompts == []
+
+
+def test_the_researcher_is_told_not_to_invent_urls():
+    """A live run spent seven fetches on gov.uk slugs the model composed from headlines; every
+    one was a 404. The one gov.uk link an actual search returned was fine."""
+    assert "Fetch ONLY a URL you have actually seen" in prompts.RESEARCHER
+    assert "search for it instead" in prompts.RESEARCHER
