@@ -2,7 +2,7 @@
 
 import { $, md } from "./dom.js";
 import { api } from "./api.js";
-import { state, resetView, setStatus, setPaused, showTab } from "./state.js";
+import { state, resetView, setStatus, setPaused, setOverriding, showTab } from "./state.js";
 import { trackTask } from "./plan.js";
 import { logEvent } from "./log.js";
 import { showRequest } from "./requests.js";
@@ -59,6 +59,7 @@ export function handle(ev) {
     case "run.finished":
       state.sid = ev.session_id || state.sid;
       trackStage(ev);
+      setOverriding(false);     // nothing left to stop at
       setStatus(ev.status);
       $("#cards").innerHTML = "";
       afterFinish();
@@ -70,7 +71,7 @@ export function handle(ev) {
   }
   // The engine is the authority on whether it is actually held: the button flipped
   // optimistically on click, these events correct it.
-  if (ev.type === "control.paused") setPaused(true);
+  if (ev.type === "control.paused") { setOverriding(false); setPaused(true); }
   if (ev.type === "control.resumed" || ev.type === "control.aborted") setPaused(false);
   if (ev.type === "override.stop") {
     for (const id of state.order) if (state.tasks[id].status === "pending") state.tasks[id].status = "skipped";

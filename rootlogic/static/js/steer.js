@@ -6,7 +6,7 @@
 
 import { $ } from "./dom.js";
 import { api } from "./api.js";
-import { state } from "./state.js";
+import { state, setOverriding } from "./state.js";
 
 let queued = [];
 
@@ -31,11 +31,13 @@ export async function steer(...cmds) {
   if (!state.run) return;
   queued.push(...cmds);
   note(describe(queued) + " — applying at the next checkpoint…");
+  setOverriding(true);
   try {
     await api(`/api/runs/${state.run}/checkpoint`, { method: "POST" });
   } catch (e) {
     queued = [];
     note("");
+    setOverriding(false);
     alert(e.message);
   }
 }

@@ -2,7 +2,7 @@
 
 import { $ } from "./dom.js";
 import { api } from "./api.js";
-import { state, resetView, setStatus, setPaused, showTab } from "./state.js";
+import { state, resetView, setStatus, setPaused, setOverriding, showTab } from "./state.js";
 import { loadHistory } from "./history.js";
 import { loadProfile, loadRules } from "./panels.js";
 import { loadPrompts } from "./prompts.js";
@@ -102,8 +102,11 @@ $("#unpause").onclick = () => {
   api(`/api/runs/${state.run}/resume`, { method: "POST" }).catch(e => alert(e.message));
 };
 
-$("#override").onclick = () =>
-  api(`/api/runs/${state.run}/checkpoint`, { method: "POST" }).catch(e => alert(e.message));
+$("#override").onclick = () => {
+  setOverriding(true);
+  api(`/api/runs/${state.run}/checkpoint`, { method: "POST" })
+    .catch(e => { setOverriding(false); alert(e.message); });
+};
 
 // Fold the status bar away. It is sticky, so while a long report is being read it sits on
 // top of the text; the chevron gives that back without giving up the run controls for good.

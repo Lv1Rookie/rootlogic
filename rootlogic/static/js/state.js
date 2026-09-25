@@ -13,12 +13,12 @@ import { resetLog } from "./log.js";
 import { refreshOutline } from "./outline.js";
 
 export const state = { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
-                       paused: false };
+                       paused: false, overriding: false };
 
 export function resetState() {
   if (state.source) state.source.close();
   Object.assign(state, { run: null, sid: null, source: null, tasks: {}, order: [], objective: "",
-                         paused: false });
+                         paused: false, overriding: false });
 }
 
 // The waiting state is authored in index.html, so it is captured once rather than duplicated
@@ -35,9 +35,23 @@ export function setStatus(s) {
   $("#pause").classList.toggle("hidden", !live || state.paused);
   $("#unpause").classList.toggle("hidden", !live || !state.paused);
   $("#override").classList.toggle("hidden", !live || state.paused);
+  // A checkpoint is not instant: the engine finishes the wave it is in first, which can take
+  // a minute. Without a pending state the button looks ignored, and it gets pressed again.
+  const waiting = live && state.overriding && !state.paused;
+  $("#override").disabled = waiting;
+  $("#override").textContent = waiting ? "Stopping…" : "Override…";
+  $("#override").title = waiting
+    ? "Waiting for the run to reach its next checkpoint"
+    : "Stop at the next checkpoint to skip, add or steer";
   // Abort used to live only inside the override card, which appears after a pause is
   // honoured - so a run that would not pause could not be stopped at all.
   $("#abort").classList.toggle("hidden", !live);
+}
+
+/** Show or clear the wait between asking for a checkpoint and reaching one. */
+export function setOverriding(overriding) {
+  state.overriding = overriding;
+  setStatus($("#v-status").textContent);
 }
 
 /** Reflect a control.paused / control.resumed event in the buttons. */
