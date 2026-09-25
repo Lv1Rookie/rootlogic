@@ -43,7 +43,13 @@ export function follow(runId) {
 
 export function handle(ev) {
   switch (ev.type) {
-    case "request": return showRequest(ev);
+    case "request":
+      // A card means the run has stopped for the user, which is what "Stopping…" was waiting
+      // for. Clearing on control.paused alone was a loop-engine assumption: the graph engine
+      // goes straight to its interrupt without that event, so the button stayed disabled with
+      // the override card already open in front of it.
+      setOverriding(false);
+      return showRequest(ev);
     case "request.resolved": {
       const c = $(`#req-${ev.request_id}`);
       if (c) c.remove();
