@@ -74,6 +74,22 @@ rootlogic forget <session>   # delete a session and its memory
 pytest                       # 209 tests, no network
 ```
 
+Running it through a gateway onto a Claude subscription — the fastest setup in practice, and
+no Anthropic API key:
+
+```bash
+.venv/bin/rootlogic web --port 8848 \
+  --provider openai --base-url http://localhost:20128/v1 --model claude-sonnet-5 \
+  --reasoning-effort none --stream --search tavily --moderation none
+```
+
+Why each flag: the gateway speaks OpenAI Chat Completions, so `--provider openai` with its
+`--base-url`, even though the model behind it is Claude. `--stream` because a router times out
+waiting for a slow first byte. `--reasoning-effort none` because the extra thinking costs wall
+clock without helping these prompts. `--search tavily` because Claude's hosted web tools are
+only reachable on the Anthropic API, not through a gateway. `--moderation none` skips the
+screening pass — drop it to keep the guardrail.
+
 Useful flags: `-y` auto-approve plan · `-v` show dropped sources · `--rounds N` reflection
 rounds · `--max-tasks N` · `--parallel N` sub-agents · `--searches N` per sub-agent
 (default 8; under 5 the web tools call search directly, because dynamic filtering batches
@@ -180,6 +196,13 @@ makes the agent both autonomous and testable, and keeps cost bounded.
   searches per worker. Budget hits are logged, not silent.
 - **Human checkpoints at the cheap moments**: before planning (clarify), before spending
   (plan approval), between waves (override). Workers never block on the user.
+- **Salvage a reply before spending another call on it.** Weaker models fail structured output
+  in three ways, each seen in live runs: they finish the object and keep talking, they stop
+  partway through it, or they hand back the schema they were shown. The adapter takes the first
+  complete object out of a chatty reply, closes off a truncated one at the last value that
+  arrived, and — only when a retry is unavoidable — names the fields it wants rather than
+  showing the schema again, which is what caused the echo. Each of these cost a finished run
+  before it was handled.
 - **Web content is untrusted**: researcher prompt forbids following instructions found in pages.
 - **Refusals**: server-side `fallbacks: "default"` retries safety-declined requests on a fallback
   model; a remaining refusal fails only that sub-task.
@@ -255,6 +278,12 @@ rootlogic research --provider openai --base-url http://localhost:20128/v1 --mode
   `--offline` screens too, with a small deterministic blocklist, so the checkpoints really run
   in demos and in `rootlogic eval --offline` rather than a missing gate looking like a working
   one.
+- **A gateway onto a Claude subscription** is the same path: the router speaks Chat
+  Completions, so it is `--provider openai` with a `--base-url`, and the model named is the
+  Claude one it routes to. This was worth supporting because it gets Claude's judgement
+  without an Anthropic API key — but the hosted `web_search`/`web_fetch` tools live on the
+  Anthropic API and do not survive the hop, so `--search tavily` is not optional, and token
+  accounting is only as good as what the router reports back.
 - Invalid combinations are rejected before anything runs (`rootlogic/backend.py`).
 - Smaller local models are noticeably weaker at planning, strict schemas and faithful citation.
   Consider a larger model when quality matters.
