@@ -47,6 +47,16 @@ class SearchError(RuntimeError):
     pass
 
 
+class SearchQuotaExceeded(SearchError):
+    """The search plan is used up. Unlike a failed query, waiting will not help: every
+    remaining sub-agent would spend model calls on a provider that has already said no."""
+
+
+# Tavily answers an exhausted plan with 432, and an unpaid one with 402. Both mean "not this
+# month", as opposed to 429, which means "not this second" and is worth retrying.
+QUOTA_STATUS = frozenset({402, 432})
+
+
 class SearchProvider(Protocol):
     name: str
 
@@ -108,6 +118,11 @@ class TavilySearch:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
+            if e.code in QUOTA_STATUS:
+                raise SearchQuotaExceeded(
+                    f"Tavily is out of credits (HTTP {e.code}). Research needs search: top up "
+                    f"the plan, wait for the quota to reset, or use --search anthropic with "
+                    f"Claude's own web tools.") from e
             raise SearchError(f"Tavily {path} failed: HTTP {e.code}") from e
         except (urllib.error.URLError, TimeoutError) as e:
             raise SearchError(f"Tavily {path} failed: {e}") from e

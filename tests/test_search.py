@@ -417,3 +417,44 @@ def test_the_site_searched_is_shown_in_the_progress_step():
     tb.on_step = steps.append
     tb.run("web_search", {"query": "zev mandate", "domains": ["gov.uk"]})
     assert steps[0].detail == "zev mandate (on gov.uk)"
+
+
+# ------------------------------------------------------------------ exhausted plans
+
+def test_an_exhausted_plan_is_its_own_error(monkeypatch):
+    """Live: Tavily answered 17 searches with HTTP 432, each sub-agent kept trying, and the
+    run produced a full-price report on whatever had been retrieved before the credits ran
+    out. 429 means "not this second" and is still an ordinary failure; 432 means "not this
+    month"."""
+    from rootlogic.search import SearchQuotaExceeded
+    import urllib.error
+
+    def raiser(code):
+        def open_(*a, **k):
+            raise urllib.error.HTTPError("u", code, "no", {}, None)
+        return open_
+
+    tav = TavilySearch(api_key="tvly-test")
+    for code in (402, 432):
+        monkeypatch.setattr("urllib.request.urlopen", raiser(code))
+        with pytest.raises(SearchQuotaExceeded, match="out of credits"):
+            tav.search("q")
+
+    monkeypatch.setattr("urllib.request.urlopen", raiser(429))
+    with pytest.raises(SearchError) as e:
+        tav.search("q")
+    assert not isinstance(e.value, SearchQuotaExceeded)
+
+
+def test_the_toolbox_does_not_offer_an_exhausted_plan_back_to_the_model():
+    """An ordinary search failure is a tool error the model can work around. This one is not:
+    telling it "search failed" invites it to search again, and so would every other sub-agent."""
+    from rootlogic.search import SearchQuotaExceeded
+
+    class Exhausted(StaticSearch):
+        def search(self, query, *, max_results=5, recency_days=0, domains=None):
+            raise SearchQuotaExceeded("Tavily is out of credits (HTTP 432).")
+
+    tb = box(Exhausted())
+    with pytest.raises(SearchQuotaExceeded):
+        tb.run("web_search", {"query": "q", "domains": []})

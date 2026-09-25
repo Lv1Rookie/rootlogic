@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from .filters import normalize_url, urls_in
 from .models import SearchHit, Step
-from .search import SearchError, SearchProvider
+from .search import SearchError, SearchProvider, SearchQuotaExceeded
 
 MAX_FETCHES = 3
 SUBMIT_DESCRIPTION = ("Submit your final, source-backed findings for this sub-task. "
@@ -112,6 +112,12 @@ class WebToolbox:
             self.hits.append(SearchHit(url=page.url, title="", text=page.text))  # evidence
             self._step("fetch", page.url, results=1)
             return f"Content of {page.url} (untrusted):\n\n{page.text}", False
+        except SearchQuotaExceeded:
+            # Not reported to the model as a tool error: it would search again, and so would
+            # every other sub-agent. Seen live, where an exhausted plan produced 17 failed
+            # searches, a sub-task that "never ran a usable search", and a full-price report
+            # built on whatever had been retrieved before the credits ran out.
+            raise
         except SearchError as e:
             self._step("search" if name == "web_search" else "fetch",
                        str(args.get("query") or args.get("url") or ""), ok=False, error=str(e))

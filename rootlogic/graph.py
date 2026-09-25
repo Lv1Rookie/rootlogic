@@ -47,6 +47,7 @@ from . import prompts
 from .control import Command as UserCommand
 from .control import Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
+from .search import SearchQuotaExceeded
 from .models import (Analysis, Clarification, Credibility, Finding, FindingDraft, Plan,
                      PlanDraft, Reflection, Report, ReportDraft, SearchHit, SourceDraft, SubTask,
                      SubTaskDraft)
@@ -397,8 +398,8 @@ class ResearchGraph:
                                                recency_days=plan.recency_days,
                                                on_step=self._step_reporter(task.id),
                                                seen=filters.urls_in(plan.topic))
-        except AuthError:
-            raise   # credentials or billing: every other call will fail too
+        except (AuthError, SearchQuotaExceeded):
+            raise   # credentials, billing or quota: every other call will fail too
         except (LLMError, AgentRefusal) as e:
             return {"raw": [{"task_id": task.id, "error": str(e)}]}
         return {"raw": [{"task_id": task.id, "draft": draft.model_dump(),
@@ -736,6 +737,11 @@ class ResearchGraph:
                 if not state.interrupts:
                     return self._report(state.values)
                 graph_input = Command(resume=self._answer(state.interrupts[0].value))
+        except SearchQuotaExceeded as e:
+            # See Orchestrator.run: the rest of the plan would retrieve nothing.
+            self.store.update_session(self.sid, status="failed")
+            self._emit("session.failed", f"Search unavailable: {e}")
+            raise
         except AgentRefusal as e:
             # See Orchestrator.run: declining is an answer, and resuming would only ask again.
             self.store.update_session(self.sid, status="refused")

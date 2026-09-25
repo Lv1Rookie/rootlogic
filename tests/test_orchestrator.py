@@ -565,3 +565,33 @@ def test_a_planner_that_declines_is_a_refusal_not_a_failed_search(tmp_path, kind
     types = ui.types()
     assert "plan.declined" in types and "session.refused" in types
     assert "report" not in types and "session.done" not in types
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_an_exhausted_search_plan_stops_the_run(tmp_path, kind):
+    """Live: with Tavily out of credits, every remaining sub-agent still spent model calls to
+    retrieve nothing, and the run wrote a report anyway. The first sub-task to hit it ends the
+    run instead, so the remaining ones are never dispatched."""
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.search import SearchQuotaExceeded
+
+    calls = []
+
+    class OutOfCredits(FakeLLM):
+        def research(self, **kw):
+            calls.append(kw["purpose"])
+            raise SearchQuotaExceeded("Tavily is out of credits (HTTP 432).")
+
+    store, ui = Store(":memory:"), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY, budget=Budget(max_parallel=1))
+    engine = (ResearchGraph(OutOfCredits(), store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(OutOfCredits(), store, ui, **kw))
+
+    with pytest.raises(SearchQuotaExceeded):
+        engine.run("impact of generative AI on newsrooms")
+
+    if kind == "loop":
+        assert len(calls) == 1                   # the rest of the wave was cancelled, not run
+    assert store.session(engine.sid)["status"] == "failed"
+    assert any("Search unavailable" in e.message for e in ui.events if e.type == "session.failed")
+    assert "report" not in ui.types()             # no full-price report on nothing

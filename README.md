@@ -131,6 +131,9 @@ Sub-agents can restrict a search to up to three sites, which is how they reach a
 `--search tavily` (also on `resume` and `web`): sub-agents search through our own `SearchProvider`
 tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in web tools. Needs
 `TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
+An exhausted plan (HTTP 432, or 402 unpaid) ends the run at the first sub-task that hits it,
+rather than letting every remaining sub-agent spend model calls retrieving nothing — seen live,
+where it cost a full-price report built on whatever had been fetched before the credits ran out.
 `--no-profile` skips reading and learning your standing preferences for one run.
 `--block DOMAIN` / `--only DOMAIN` (repeatable) apply source rules to one run.
 `--verify-claims N` sets how many claims are checked against their pages (default 30, spread

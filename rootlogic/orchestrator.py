@@ -21,6 +21,7 @@ from .moderation import Blocked, ModerationGate, Moderator, recovery_hint
 from . import prompts
 from .control import Command, Control, Event, Interaction, step_event
 from .llm import LLM, AgentRefusal, AuthError, LLMError
+from .search import SearchQuotaExceeded
 from .models import (Analysis, Clarification, Credibility, Finding, FindingDraft, Plan,
                      PlanDraft, Reflection, Report, ReportDraft, SourceDraft, SubTask,
                      SubTaskDraft)
@@ -128,6 +129,12 @@ class Orchestrator:
             self._emit("session.blocked", f"Stopped by content moderation: {e}"
                        + recovery_hint(e.stage, self.sid))
             return None
+        except SearchQuotaExceeded as e:
+            # Stopping here beats grinding through the plan with no search: the sub-tasks that
+            # remain would each spend model calls and retrieve nothing.
+            self.store.update_session(self.sid, status="failed")
+            self._emit("session.failed", f"Search unavailable: {e}")
+            raise
         except AgentRefusal as e:
             # Declining is an answer, not a crash: a run recorded as "failed" reads like the
             # tool broke, and the evaluation set scored a working refusal as a miss.
@@ -299,8 +306,14 @@ class Orchestrator:
                 t = futures[fut]
                 try:
                     result = fut.result()
-                except AuthError:
-                    raise   # credentials or billing: every other call will fail too
+                except (AuthError, SearchQuotaExceeded):
+                    # Credentials, billing or quota: every other call will fail the same way.
+                    # Cancelling first matters - the pool has already queued the rest of the
+                    # wave, and leaving them to run spends model calls on a provider that has
+                    # said no.
+                    for pending in futures:
+                        pending.cancel()
+                    raise
                 except (LLMError, AgentRefusal) as e:
                     self._task_failed(t, str(e))
                 else:
