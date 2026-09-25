@@ -14,7 +14,7 @@ const PANELS = [
   ["#continue", "Continue this research"],
   ["#progress-panel", "Progress"],
   ["#plan-panel", "Plan"],
-  ["#result-panel", "Result"],
+  ["#result-panel", "Logs/Result/Usage"],   // one panel, three tabs: name all three
 ];
 
 const visible = el => !!el && !el.classList.contains("hidden") && el.getBoundingClientRect().height > 0;

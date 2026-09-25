@@ -391,6 +391,9 @@ label.inline:hover { color: var(--ink); }
   padding: 2px 9px; border-radius: var(--r-pill);
   font-size: 11.5px; font-weight: 650; letter-spacing: .02em;
   background: var(--code); color: var(--muted); border: 1px solid transparent;
+  /* Squeezed into a narrow column it broke "done" across two lines and rounded itself into a
+   * circle that overflowed the cell. A status is one word; it does not wrap. */
+  white-space: nowrap; flex: none;
 }
 .pill::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%;
@@ -512,8 +515,17 @@ td.id {
   color: var(--muted); width: 1%; white-space: nowrap;
 }
 /* A sub-task question is a sentence, and a table column will happily be as wide as the
- * longest word in it unless told the cell may break. */
+ * longest word in it unless told the cell may break. The other two columns hold an id and a
+ * status - both one short word - so they are sized to their content and the question takes
+ * whatever is left, rather than all three being squeezed equally. */
+#plan-panel table { table-layout: fixed; width: 100%; }
 #plan-rows td { overflow-wrap: anywhere; }
+#plan-panel th:first-child, #plan-rows td.id { width: 74px; }
+#plan-panel th:last-child, #plan-rows td:last-child { width: 78px; }
+/* Headers are nowrap everywhere else, which here pushed "SUB-AGENT" straight through the
+ * column beside it. They wrap here instead - but at the hyphen, not mid-word: "SUB-AGE NT"
+ * is worse than the collision it replaced. */
+#plan-panel th { white-space: normal; overflow-wrap: normal; word-break: normal; }
 
 /* The usage table is six numeric columns that cannot usefully shrink, so rather than spill
  * out of the panel it scrolls inside it. */
