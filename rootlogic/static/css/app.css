@@ -155,12 +155,14 @@ main {
   border-bottom: 1px solid var(--line-soft);
 }
 .brand svg { flex: none; filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--accent) 35%, transparent)); }
-.brand > div { min-width: 0; flex: 1 1 0; }     /* the name gives way before the controls do */
+/* The controls keep their size and the name gives way, but only if the name is allowed to
+ * be cut: an inline <b> overflows its box rather than shrinking, which is what let the
+ * buttons come to rest on top of the word. */
+.brand-name { min-width: 0; flex: 1 1 0; overflow: hidden; }
+.brand b, .brand span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand b { font-size: 17px; letter-spacing: -.015em; }
-.brand span {
-  color: var(--muted); font-size: 12px; letter-spacing: .01em;
-  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.brand span { color: var(--muted); font-size: 12px; letter-spacing: .01em; }
+.brand .rail-btn, .brand .uiv-theme-slot { flex: none; }
 
 /* ---------------------------------------------------------------- hiding the sidebar
  * Wide enough, the sidebar is a column beside the page and folds away to give the report the
@@ -683,6 +685,10 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
   .layout { grid-template-columns: minmax(0, 1fr); }
   body:not(.rail-hidden) .layout { grid-template-columns: minmax(180px, 46vw) minmax(0, 1fr); }
   .brand { position: static; backdrop-filter: none; }
+  /* A sidebar this narrow has room for the mark and its two controls, and nothing else: the
+   * name would be three cut letters, which says less than the mark already does. */
+  .brand-name { display: none; }
+  .brand { justify-content: space-between; gap: 8px; }
   /* Four things do not fit on one line here, so the menu takes its own rather than being
    * squeezed on top of the title. */
   .jump { flex: 1 1 100%; max-width: none; }
