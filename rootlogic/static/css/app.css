@@ -178,8 +178,12 @@ main {
 body:not(.rail-hidden) .rail-open-btn { display: none; }
 body.rail-hidden .layout { grid-template-columns: minmax(0, 1fr); }
 body.rail-hidden aside { display: none; }
-/* the floating button stands where the composer would start, so the page steps aside for it */
+/* The floating button is pinned to the viewport, so anything that comes to rest under it has
+ * to leave it room: the page starts below it, and the status bar - which stops at the top of
+ * the window as the reader scrolls - starts to the right of it. */
 body.rail-hidden main { padding-top: 60px; }
+body.rail-hidden .statusbar { padding-left: 58px; }
+.rail-open-btn { z-index: 50; }
 
 /* The theme toggle is the one control that lives in the brand row. */
 .theme-toggle {
@@ -437,9 +441,12 @@ label.inline:hover { color: var(--ink); }
 .bar-toggle:hover .fold-mark { color: var(--accent); border-color: var(--accent-line); }
 .statusbar.collapsed .bar-toggle .fold-mark { transform: rotate(90deg); }
 .statusbar.collapsed { padding: 8px 14px; gap: 8px; }
+/* Folded, the bar is one line: a title longer than the room it has is cut with an ellipsis
+ * rather than wrapping the bar back open. `min-width: 0` is what lets it shrink at all - a
+ * flex item defaults to the width of its content and would otherwise push the pill out. */
 .statusbar.collapsed .topic {
   font-size: 14px; font-weight: 600; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; max-width: 46vw;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto;
 }
 /* the pill rides up onto the title line: folded away is not the same as gone quiet */
 .statusbar.collapsed .statusbar-head > div {
