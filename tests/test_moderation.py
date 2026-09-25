@@ -337,3 +337,25 @@ def test_a_missing_api_key_is_explained_not_a_typeerror(monkeypatch):
     llm = Backend().make_llm(lambda u: None)
     with pytest.raises(AuthError, match="ANTHROPIC_API_KEY"):
         llm.structured(purpose="clarify", system="s", prompt="p", schema=Clarification)
+
+
+def test_a_gateway_key_is_not_an_openai_key(monkeypatch):
+    """Live: OPENAI_API_KEY held an OpenRouter key, so `auto` chose OpenAI moderation and every
+    call 401ed - each harmful-request eval died at the clarify step and scored as 'failed'
+    rather than refused, with no screening actually running."""
+    openai_backend = dict(provider="openai", model="claude-sonnet-5", search="tavily",
+                          base_url="http://localhost:20128/v1")
+    for foreign in ("sk-or-v1-abc123", "sk-ant-abc123"):
+        monkeypatch.setenv("OPENAI_API_KEY", foreign)
+        with pytest.raises(BackendError, match="not a key for OpenAI's own API"):
+            Backend(**openai_backend).validate()
+        with pytest.raises(BackendError, match="needs a key for OpenAI's own API"):
+            Backend(**openai_backend, moderation="openai").validate()
+        # ...and the ways out are still open.
+        assert Backend(**openai_backend, moderation="none").validate().resolved_moderation() \
+            == "none"
+        assert Backend(**openai_backend, moderation="llama-guard").validate() \
+            .resolved_moderation() == "llama-guard"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-realone")
+    assert Backend(**openai_backend).validate().resolved_moderation() == "openai"

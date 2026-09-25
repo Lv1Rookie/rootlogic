@@ -128,7 +128,13 @@ class Orchestrator:
             self._emit("session.blocked", f"Stopped by content moderation: {e}"
                        + recovery_hint(e.stage, self.sid))
             return None
-        except (LLMError, AgentRefusal) as e:
+        except AgentRefusal as e:
+            # Declining is an answer, not a crash: a run recorded as "failed" reads like the
+            # tool broke, and the evaluation set scored a working refusal as a miss.
+            self.store.update_session(self.sid, status="refused")
+            self._emit("session.refused", f"Declined: {e}")
+            raise
+        except LLMError as e:
             self.store.update_session(self.sid, status="failed")
             self._emit("session.failed", f"Failed: {e}")
             raise
@@ -250,6 +256,14 @@ class Orchestrator:
         for t in plan.subtasks:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
         continuity.merge_previous(plan, self.previous)
+        # A planner that returns nothing to research has declined the request - seen live on
+        # the harmful-request evals, where the objective came back as "Decline to provide
+        # research assistance". Reporting that as "no sources found" describes a search that
+        # failed, when what happened is that the model said no.
+        if not plan.subtasks and self.previous is None:
+            self._emit("plan.declined", f"The planner declined this request: {plan.objective}",
+                       objective=plan.objective)
+            raise AgentRefusal(f"the planner declined this request: {plan.objective}")
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
         self._emit("plan.created", f"Plan: {continuity.describe_tasks(plan)}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])

@@ -402,7 +402,7 @@ label.inline:hover { color: var(--ink); }
 .pill.running { background: var(--info-soft); color: var(--info); border-color: var(--info-line); }
 .pill.running::before { animation: pulse 1.6s var(--ease) infinite; }
 .pill.done { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
-.pill.interrupted { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.pill.interrupted, .pill.refused { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
 .pill.failed, .pill.aborted, .pill.blocked { background: var(--bad-soft); color: var(--bad); border-color: var(--bad-line); }
 .pill.pending { background: var(--code); color: var(--muted); }
 .pill.skipped { background: var(--code); color: var(--muted); text-decoration: line-through; }

@@ -538,3 +538,30 @@ def test_a_run_that_found_nothing_says_so_instead_of_writing_from_memory(tmp_pat
     text = report.to_markdown().lower()
     assert "no sources" in text or "nothing" in text or "no evidence" in text
     assert "predimed" not in text, "no claims should appear that no source supported"
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_a_planner_that_declines_is_a_refusal_not_a_failed_search(tmp_path, kind):
+    """Live, on the harmful-request evals: the planner answered with the objective "Decline to
+    provide research assistance for this request" and no sub-tasks. That came out as a "No
+    sources found" report and a session marked failed - a search that came up empty, which is
+    not what happened, and the evaluation set scored the refusal as a miss."""
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.llm import AgentRefusal
+
+    declined = {PlanDraft: lambda p: PlanDraft(
+        objective="Decline to provide research assistance for this request",
+        recency_days=0, subtasks=[])}
+    store, ui = Store(":memory:"), ScriptedUI()
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(FakeLLM(handlers=declined), store, ui,
+                            checkpoint_path=tmp_path / "cp.db", **kw) if kind == "graph"
+              else Orchestrator(FakeLLM(handlers=declined), store, ui, **kw))
+
+    with pytest.raises(AgentRefusal, match="declined this request"):
+        engine.run("something the model will not research")
+
+    assert store.session(engine.sid)["status"] == "refused"      # not "failed"
+    types = ui.types()
+    assert "plan.declined" in types and "session.refused" in types
+    assert "report" not in types and "session.done" not in types

@@ -14,6 +14,17 @@ from .llm import MODEL, UsageSink
 from .moderation import Moderator
 
 
+# OpenRouter ("sk-or-v1-…"), Anthropic ("sk-ant-…") and gateway keys are all plausible values
+# of OPENAI_API_KEY, and none of them work against api.openai.com/v1/moderations.
+_FOREIGN_KEY_PREFIXES = ("sk-or-", "sk-ant-", "sk-lf-")
+_KEY_HINT = ("Use --moderation llama-guard with a local Llama Guard (ollama pull llama-guard3), "
+             "or --moderation none to run unscreened, or set OPENAI_API_KEY to an OpenAI key.")
+
+
+def _is_openai_key(key: str | None) -> bool:
+    return bool(key) and not key.startswith(_FOREIGN_KEY_PREFIXES)
+
+
 class BackendError(ValueError):
     pass
 
@@ -62,12 +73,23 @@ class Backend:
 
     def resolved_moderation(self) -> str:
         """Claude screens content itself; other models need a moderator or an explicit opt-out."""
+        if self.moderation == "openai" and not _is_openai_key(os.environ.get("OPENAI_API_KEY")):
+            raise BackendError(
+                "--moderation openai needs a key for OpenAI's own API. " + _KEY_HINT)
         if self.moderation != "auto":
             return self.moderation
         if self.provider == "anthropic":
             return "none"
-        if os.environ.get("OPENAI_API_KEY"):
+        if _is_openai_key(os.environ.get("OPENAI_API_KEY")):
             return "openai"
+        if os.environ.get("OPENAI_API_KEY"):
+            # A key for a gateway or another vendor is not an OpenAI key. Choosing "openai"
+            # here produced a moderator that 401ed on its first call, which killed the run at
+            # the clarify step: every harmful-request eval came back "failed" rather than
+            # refused, and the safety layer that was meant to be running was not.
+            raise BackendError(
+                "OPENAI_API_KEY is set but is not a key for OpenAI's own API, so its "
+                "moderation endpoint would reject every call. " + _KEY_HINT)
         raise BackendError(
             "non-Claude models have no built-in safety screening. Set OPENAI_API_KEY to use "
             "OpenAI's free moderation API, or --moderation llama-guard with a local Llama Guard "

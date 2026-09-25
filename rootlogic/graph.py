@@ -305,6 +305,12 @@ class ResearchGraph:
             self.store.upsert_task(self.sid, t.id, t.question, t.status, t.origin)
         plan.subtasks = [SubTask.model_validate(t) for t in s.get("previous_tasks", [])] \
             + plan.subtasks
+        # See Orchestrator._plan: nothing to research on a fresh topic means the model
+        # declined, and that is a refusal rather than a search that found nothing.
+        if not plan.subtasks and not s.get("previous_tasks"):
+            self._emit("plan.declined", f"The planner declined this request: {plan.objective}",
+                       objective=plan.objective)
+            raise AgentRefusal(f"the planner declined this request: {plan.objective}")
         recency = f"sources ≤ {plan.recency_days} days old" if plan.recency_days else "any age"
         self._emit("plan.created", f"Plan: {continuity.describe_tasks(plan)}, {recency}",
                    objective=plan.objective, tasks=[t.model_dump() for t in plan.subtasks])
@@ -730,7 +736,12 @@ class ResearchGraph:
                 if not state.interrupts:
                     return self._report(state.values)
                 graph_input = Command(resume=self._answer(state.interrupts[0].value))
-        except (LLMError, AgentRefusal) as e:
+        except AgentRefusal as e:
+            # See Orchestrator.run: declining is an answer, and resuming would only ask again.
+            self.store.update_session(self.sid, status="refused")
+            self._emit("session.refused", f"Declined: {e}")
+            raise
+        except LLMError as e:
             self.store.update_session(self.sid, status="failed")
             self._emit("session.failed", f"Failed: {e}. Continue later with: rootlogic resume "
                                          f"{self.sid}")

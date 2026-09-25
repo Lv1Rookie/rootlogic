@@ -24,7 +24,7 @@ from .models import Plan, SubTaskDraft
 from .orchestrator import Budget, Orchestrator
 from .store import Store
 from .backend import Backend, BackendError, parse_prices
-from .llm import AuthError, LLMError
+from .llm import AgentRefusal, AuthError, LLMError
 from .filters import RULES, SourcePolicy, clean_domain
 from .moderation import offline_moderator
 from .prompts import EDITABLE, PromptSet
@@ -630,6 +630,9 @@ def main(argv: list[str] | None = None) -> int:
     except AuthError as e:
         console.print(f"[red]Authentication problem:[/] {e}")
         return 2
+    except AgentRefusal as e:   # a refusal is an answer: report it as one, not as a crash
+        console.print(f"[yellow]Declined:[/] {e}")
+        return 3
     except LLMError as e:   # the session is already marked failed and logged
         console.print(f"[red]Run failed:[/] {e}")
         return 1
