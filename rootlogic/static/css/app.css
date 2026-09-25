@@ -272,12 +272,16 @@ h2 + .meta { margin-top: -4px; }
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   padding: 10px 14px 12px; border-top: 1px solid var(--line-soft); background: var(--panel-2);
 }
-.composer-opts { gap: 10px 14px; row-gap: 8px; }
-.composer-opts select { width: auto; min-width: 160px; }
-.composer-opts input[type=number] { width: 62px; }
-.composer-opts label.inline { font-size: 13px; white-space: nowrap; }
+/* Everything on the bar has to be able to shrink. A flex item is as wide as its contents
+ * unless told otherwise, and the panel clips what overflows, so a fixed 160px select in a
+ * 200px column simply ran off the edge and was cut. */
+.composer-bar > * { min-width: 0; }
+.composer-opts { gap: 10px 14px; row-gap: 8px; min-width: 0; flex: 1 1 260px; }
+.composer-opts select { width: auto; min-width: 0; flex: 1 1 150px; max-width: 100%; }
+.composer-opts input[type=number] { width: 62px; flex: none; }
+.composer-opts label.inline { font-size: 13px; white-space: nowrap; min-width: 0; }
 .composer-bar .btn.primary { padding: 8px 20px; }
-.composer-go { gap: 10px; flex-wrap: nowrap; }
+.composer-go { gap: 10px; flex-wrap: wrap; min-width: 0; }
 .composer-keys { white-space: nowrap; font-size: 12px; color: var(--faint); }
 @media (max-width: 720px) { .composer-keys { display: none; } }   /* no keyboard to speak of */
 
@@ -699,6 +703,11 @@ tfoot td { border-top: 1px solid var(--line); border-bottom: none; font-weight: 
 @media (max-width: 560px) {
   .composer-bar { flex-direction: column; align-items: stretch; }
   .composer-bar .btn.primary { width: 100%; }
+  /* one control per line rather than four squeezed onto two */
+  .composer-opts { flex-direction: column; align-items: stretch; }
+  .composer-opts select { flex: none; width: 100%; }
+  /* a number and its label read as a row; a checkbox belongs beside its own words */
+  .composer-opts label.inline:has(input[type=number]) { justify-content: space-between; }
   .statusbar .row { width: 100%; }
   .statusbar .row .btn { flex: 1 1 auto; }
   #tab-report { font-size: 15px; }
