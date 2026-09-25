@@ -97,6 +97,8 @@ searches and can exhaust a small budget before any result returns) ·
 `--zdr` Zero Data Retention mode (also on `resume` and `web`): sets `allowed_callers: ["direct"]`
 on the web tools, which makes them ZDR-eligible but turns off dynamic filtering, so searches may
 use more context tokens.
+Sub-agents can restrict a search to up to three sites, which is how they reach a primary source (the consultation on gov.uk) rather than coverage of it; a site-restricted search uses Tavily's deeper pass. They may only fetch a URL a search returned, a page they read linked to, or the topic supplied — a URL assembled from a headline is refused.
+
 `--search tavily` (also on `resume` and `web`): sub-agents search through our own `SearchProvider`
 tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in web tools. Needs
 `TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
@@ -312,7 +314,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 | Guardrail | How it works | Model or code? |
 |---|---|---|
 | **Claim verification** | Thirty claims per run (`--verify-claims N`) are checked against the text of the pages they cite, captured when sub-agents fetch them or fetched for the check. The budget is spread round-robin across sub-tasks, so a ten-sub-task run checks three claims from each rather than all thirty from the first; the rest are labelled **unchecked** in the claim-check table, never assumed good. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. Missing, too-short or unusable page text (navigation, paywall, wrong page) means **unverifiable**, never "unsupported": failing to read a page says nothing about the claim. Claims that fail are withheld from the writer as fact. | model judges, code checks |
-| **Corroboration labels** | *corroborated* (2+ independent sites), *single source*, or *weak* (only low-credibility sources). Low-credibility sources can support a claim but never alone. | code |
+| **Corroboration labels** | *corroborated* (2+ independent sites), *single source*, or *weak* (only low-credibility sources). Low-credibility sources can support a claim but never alone. Posts on social platforms (Facebook, X, LinkedIn, Reddit and the like) are rated low by default whatever the model thought of them — they are kept, because a minister does announce policy on X, but a claim resting only on them is *weak*. Mark a site trusted to override that. | code |
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
 | **Links in the topic** | A URL you paste into the topic is read once, up front, and put through the same source rules as anything a sub-agent finds — a blocked domain is never fetched at all. The page is recorded in `sources`, its text goes into the evidence the verifier reads, and an excerpt is given to the planner. It stays untrusted web content: the researcher prompt forbids obeying instructions found in a fetched page. | code decides, model reads |
 | **Report checks** | `[n]` citations pointing at no source become `[?]`. Uncited factual-looking sentences and takeaways citing only low-credibility sources are listed. Every report ends with **Confidence and limitations** and a **Claim check** table. | code |

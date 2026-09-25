@@ -7,7 +7,7 @@ import pytest
 
 from rootlogic.context import findings_block
 from rootlogic.fake_llm import FakeLLM
-from rootlogic.filters import SourcePolicy, clean_domain, filter_sources
+from rootlogic.filters import SourcePolicy, clean_domain, filter_sources, normalize_url
 from rootlogic.llm import LLMError, _search_hits
 from rootlogic.models import (CheckedClaim, ClaimDraft, ClaimVerdictDraft, Credibility, Finding,
                               FindingDraft,
@@ -593,3 +593,35 @@ def test_unverifiable_detail_names_the_uncited_claim():
     from rootlogic.models import ReportQuality
     q = ReportQuality(unverifiable_reasons={"page_unreadable": 2, "no_sources_cited": 1})
     assert q.unverifiable_detail == "2 page text unavailable, 1 no source cited"
+
+
+def test_social_media_posts_are_rated_low_without_being_dropped():
+    """Live: a UK policy run cited Facebook, Instagram and LinkedIn posts for government
+    deadlines, and the model had rated them credible. They are kept - a minister does
+    announce policy on X - but a claim resting only on one is labelled weak."""
+    sources = [src("https://www.facebook.com/groups/1/posts/2", "high"),
+               src("https://www.linkedin.com/posts/someone_x", "medium"),
+               src("https://www.gov.uk/government/news/real", "high")]
+    kept, dropped = filter_sources(sources, recency_days=0, today=TODAY)
+
+    assert len(kept) == 3 and not dropped          # never blocked, only rated
+    assert [s.credibility.level for s in kept] == ["low", "low", "high"]
+    assert "anyone can publish" in kept[0].credibility.reason
+
+
+def test_trusting_a_social_site_yourself_still_wins():
+    policy = SourcePolicy.from_rules([{"domain": "x.com", "rule": "trust"}])
+    kept, _ = filter_sources([src("https://x.com/dft/status/1", "medium")],
+                             recency_days=0, today=TODAY, policy=policy)
+    assert kept[0].credibility.level == "high"
+
+
+def test_a_claim_resting_only_on_social_posts_is_weak():
+    check = CheckedClaim(text="The deadline moved to 2035",
+                         source_urls=["https://www.facebook.com/p/1",
+                                      "https://www.instagram.com/p/2"])
+    sources = [src("https://www.facebook.com/p/1"), src("https://www.instagram.com/p/2")]
+    for s in sources:
+        SourcePolicy().adjust(s)
+    corroborate(check, {normalize_url(s.url): s for s in sources})
+    assert check.corroboration == "weak"

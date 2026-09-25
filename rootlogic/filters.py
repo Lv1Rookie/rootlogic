@@ -17,6 +17,16 @@ from .models import Credibility, SearchHit, SourceDraft
 
 RULES = ("block", "allow", "trust", "distrust")
 
+# Platforms where anyone can publish anything under any name. A post here is not worthless -
+# a minister announces policy on X, a researcher threads a result on LinkedIn - so these are
+# never blocked, only rated low: low-credibility sources can support a claim, but never alone
+# (see verify.corroborate). A live UK policy run cited Facebook and Instagram posts for
+# government deadlines, which is the case this exists for. Self-publishing platforms that are
+# mostly expert writing (Substack, Medium) are deliberately not here: use source rules if you
+# want them downgraded.
+SOCIAL = frozenset({"facebook.com", "instagram.com", "x.com", "twitter.com", "linkedin.com",
+                    "tiktok.com", "reddit.com", "threads.net", "quora.com", "pinterest.com"})
+
 
 def host_of(url: str) -> str:
     return urlsplit(normalize_url(url)).netloc
@@ -84,6 +94,11 @@ class SourcePolicy:
             source.credibility = Credibility(level="low", reason="You marked this site unreliable")
         elif domain_matches(host, self.trusted):
             source.credibility = Credibility(level="high", reason="You marked this site trusted")
+        elif domain_matches(host, SOCIAL) and source.credibility.level != "low":
+            # The model rates a plausible-sounding post as credible more often than it should.
+            # Marking your own site trusted still wins: the rule above runs first.
+            source.credibility = Credibility(
+                level="low", reason=f"social media post ({host}): anyone can publish here")
 
 
 _RELATIVE = re.compile(r"(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago", re.I)
@@ -201,8 +216,9 @@ def filter_sources(
             if published is not None and published < cutoff:
                 dropped.append((s.url, f"outdated ({published.isoformat()} < {cutoff.isoformat()})"))
                 continue
-        if policy is not None:
-            policy.adjust(s)
+        # Always adjust, policy or not: the social-media rating is a default of the system,
+        # not a user rule, and a run with no source rules needs it just as much.
+        (policy or SourcePolicy()).adjust(s)
         seen.add(key)
         kept.append(s)
     return kept, dropped
