@@ -45,9 +45,24 @@ function addTitleBlock() {
   body.parentNode.insertBefore(el, body);
 }
 
+/** The report's own title, as it is printed: the heading the writer gave it, or the topic. */
+function reportTitle() {
+  const heading = $("#report-body h1")?.textContent.trim();
+  return (heading || meta.topic || state.topic || "Research report").replace(/\s+/g, " ");
+}
+
 export function savePdf() {
   if (!markdown) return;
   addTitleBlock();
+  // The browser takes the PDF's title, and the name it offers to save under, from the
+  // document's own - which is "rootlogic", the name of the app rather than of the paper. It
+  // is lent the report's title for the duration of the print and given its own back after.
+  const pageTitle = document.title;
+  const restore = () => { document.title = pageTitle; };
+  document.title = reportTitle();
+  window.addEventListener("afterprint", restore, { once: true });
+  setTimeout(restore, 60_000);   // afterprint is not fired by every browser
+
   // The dialog is the browser's: "Save as PDF" is its own destination on every platform.
   window.print();
 }

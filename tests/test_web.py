@@ -495,3 +495,14 @@ def test_print_keeps_the_report_and_drops_the_rest_by_default():
         assert rule in css, f"print.css should keep only the report: missing {rule}"
     assert "#print-title { display: block" in css, \
         "the title page is a sibling of the report body, so it needs saying"
+
+
+def test_the_pdf_is_titled_after_the_report_not_the_app():
+    """A saved PDF was titled "rootlogic" - the app's name, which is also the name the browser
+    offers to save the file under. It should carry the paper's own title."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "rootlogic" / "static" / "js" / "export.js").read_text()
+    assert "reportTitle" in js and "#report-body h1" in js, \
+        "the title comes from the report's own heading"
+    assert "document.title = reportTitle()" in js
+    assert "afterprint" in js, "the page's title has to be given back once printing is over"
