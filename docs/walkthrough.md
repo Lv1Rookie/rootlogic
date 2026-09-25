@@ -624,7 +624,7 @@ Every change went through the same routine:
 ## Step 21: Run it for real, on a laptop, for free
 
 176 mocked tests passed before the first live run. Then every real run broke something new.
-Twenty defects came out of live testing, none of them reachable by the test suite as it stood,
+Twenty-one defects came out of live testing, none of them reachable by the test suite as it stood,
 and each one is now covered by a test that fails against the old code.
 
 | What broke | Why the tests missed it | Fix |
@@ -649,6 +649,7 @@ and each one is now covered by a test that fails against the old code.
 | Facebook and Instagram posts carried government deadlines at the model's own credibility rating | no fixture cites a social post | rate those platforms low by default |
 | A declined request was reported as a search that found no sources | the fake planner always returns sub-tasks | an empty plan on a fresh topic is a refusal |
 | Moderation was configured, authenticated with someone else's key, and 401ed every run | tests inject a moderator rather than resolving one from the environment | reject a foreign key at startup |
+| The claim-check table's verdict columns sat outside the panel on a narrow window | no test measures layout, and the author's window is wide | scroll the table, not the page |
 
 Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
 path — a graded requirement, passing its unit tests, doing nothing in production, because
@@ -797,6 +798,31 @@ The lesson is about where a guardrail belongs. **Stopping a model from doing the
 only helps if it can do the right thing instead** - otherwise the run finds a worse workaround,
 and the metric that was supposed to improve gets worse (unverifiable went 7 to 11 before it
 went to 2).
+
+A later run on a different body confirmed it was the reach and not the topic: asked what the
+WHO recommends for free sugar intake, the sub-agents searched `(on who.int)` unprompted and
+came back with seven WHO sources out of thirty-two - the IRIS document store, the 2015 news
+item, a CDN fact sheet - and cited no social media at all. The credibility rule had nothing to
+downgrade, because there was nothing to fall back to.
+
+### A check that lies is worse than no check
+
+The report's claim-check table is four columns: claim, verdict, corroboration, sources. On a
+310px panel it was 461px wide, and nothing scrolled - the two right-hand columns were simply
+outside the panel. A reader on a narrow window could see that a claim had been checked and not
+what the verdict was, which is the column the table exists for. The usage table had the same
+problem and had been given `overflow-x: auto` long before; the report's tables never were. Now
+the table scrolls inside the panel and the prose around it, which wraps fine, stays put.
+
+The bug is ordinary. What is worth writing down is what happened next: the script that measures
+spill - every descendant whose right edge is outside the panel - still reported 164 escapes
+after the fix. The fix had worked. The measurement was wrong: cells inside a scrolling
+container do extend past the panel, and are perfectly reachable. **A check that counts
+reachable content as broken will also, one day, count broken content as fine**, so it was
+rewritten to ignore anything under a horizontally scrollable ancestor before either number was
+believed. It then read zero at 380px, and the table measured 722px inside a 996px panel at
+desktop width, which is the other half of the claim: the fix cost nothing where there was no
+problem.
 
 The pattern worth taking away: **the tests all took the same path through the code.** Claude's
 hosted tools mean `search is None`, which skipped the client-side search branch, the fetcher,
