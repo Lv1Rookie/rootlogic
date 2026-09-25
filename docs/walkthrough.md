@@ -238,6 +238,15 @@ Two details are worth knowing:
   and that it must never follow instructions written inside them.
 - **Autonomy by default:** the critic is told to ask the user only when no search could
   resolve the gap. Otherwise it keeps working on its own.
+- **A rewritten prompt is disclosed, for the whole session.** Four of them (planner, researcher,
+  verifier, writer) can be rewritten in the UI, and a run that rewrote one says so in the log
+  and in the report - a custom verifier or writer changes what the report's own numbers mean,
+  and the report is read by someone who did not choose the prompt. Resume made that harder than
+  it looks: the leg that finishes a report can be started with different prompts from the leg
+  that began it. Announcing the resumed leg's prompts alone would have *erased* the record of
+  the first leg, so the session keeps the union of both, a prompt that changed between legs is
+  called out as `prompt.changed`, and the report discloses what the whole session used rather
+  than what its last leg used.
 
 ## Step 11: Test without spending money → [`fake_llm.py`](../rootlogic/fake_llm.py) + [`tests/`](../tests/)
 
@@ -252,7 +261,8 @@ check that:
 - Overrides (skip/add/note/stop/abort) work.
 - A failing worker doesn't crash the session.
 - Memory recalls past topics.
-- The LangGraph engine resumes after a crash, and saves the same log details as the loop engine.
+- The LangGraph engine resumes after a crash, saves the same log details as the loop engine,
+  and discloses the prompts of both legs when it is resumed with different ones.
 - The web API round-trips questions, plan edits and overrides, and replays SSE.
 - The search tools enforce their limits, and Tavily requests and responses map correctly.
 - The OpenAI-compatible adapter sends the right wire format and handles refusals, truncation,
@@ -261,7 +271,7 @@ check that:
 - Follow-ups reuse earlier findings, chain, and don't count earlier tasks against the budget.
 - Guardrails behave as designed:
   - Invented quotes are downgraded.
-  - Claims without page text are "unverifiable".
+  - Claims without page text are "unverifiable", and claims citing nothing say so instead.
   - Corroboration labels are correct.
   - Source rules block, allow and override credibility.
   - Bad citations are fixed and uncited statements flagged.
@@ -491,7 +501,10 @@ runs, so "the guardrail helped" becomes a number.
 Three lessons from the first live runs, each now covered by a test:
 - **"Couldn't read it" is not "it's false."** A landing page of navigation text made the
   verifier mark seven true claims "unsupported". Unusable or too-short page text is now
-  "unverifiable", and the verifier has an explicit `no_usable_evidence` verdict.
+  "unverifiable", and the verifier has an explicit `no_usable_evidence` verdict. The same
+  distinction needed drawing one level further down: a claim that cited *nothing* took the
+  same "page text unavailable" label, which sent the reader hunting for a fetch problem behind
+  a claim that had never named a page. It has its own reason now, `no_sources_cited`.
 - **A dead tool should stop the run, not repeat it.** A failing web search produced eight
   turns of a growing conversation: 330k input tokens and $1.86 for zero sources. The loop now
   gives up after two fruitless turns, and caches its prefix so retries are cheap.
