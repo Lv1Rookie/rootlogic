@@ -26,6 +26,35 @@ $ rootlogic research "impact of generative AI on local newsrooms"
 04:36:58 session.done       Report saved to .rootlogic/reports/c3b11a10-….md · 14 LLM calls · 212,480 tokens · $1.84
 ```
 
+## Reviewing this in 15 minutes
+
+If you are here to assess the project rather than use it, this is the shortest honest path.
+
+1. **Run it for free** (no API key, ~30 seconds) — the whole pipeline against a fake model:
+   ```bash
+   pip install -e '.[web]' && rootlogic research --offline -y "impact of generative AI on newsrooms"
+   ```
+   The report is fiction; the plan, sub-agents, filters, verification and logging are real.
+   Drop the `-y` to be shown the plan and asked to approve or edit it, which is the part of
+   the design worth seeing.
+2. **Run it for real** (~2 minutes, ~$1.50) — see [Quick start](#quick-start) for keys, then a
+   topic you know well, so you can judge the report yourself. `rootlogic web` gives the same
+   run with a plan you can edit and Pause / Override / Abort while it works.
+3. **Three files, if you read nothing else:**
+   - [`rootlogic/orchestrator.py`](rootlogic/orchestrator.py) — the agent loop: plan, dispatch
+     sub-agents, reflect, verify, write. The `Interaction` protocol is why the same engine
+     drives a terminal, a browser and a test.
+   - [`rootlogic/verify.py`](rootlogic/verify.py) — the guardrails: claims checked against the
+     text of the pages they cite, with code confirming the model's quote is really there.
+   - [`rootlogic/graph.py`](rootlogic/graph.py) — the same agent as a LangGraph state machine,
+     with checkpointing and resume.
+4. **What it gets wrong, and how that is known:**
+   [`docs/walkthrough.md`](docs/walkthrough.md) is the build log — every defect live testing
+   found that the 324 mocked tests could not, and what each one changed. The section on the run
+   controls and the one on where a sub-agent's sources come from are the two worth reading.
+
+`pytest` runs the whole suite in about 15 seconds and touches no network.
+
 ## Tracing (optional)
 
 Every model request is already recorded in the `llm_calls` table and every decision in
@@ -403,4 +432,4 @@ See [docs/langgraph-vs-loop.md](docs/langgraph-vs-loop.md) for a side-by-side co
 
 - MCP client so users can plug in extra sources (Semantic Scholar, internal docs)
 - Embedding-based memory (sqlite-vec) alongside FTS5
-- Prompt caching for shared worker prefix; eval set of topics with graded reports
+- Prompt caching for the shared worker prefix
