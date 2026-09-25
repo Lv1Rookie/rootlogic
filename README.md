@@ -102,9 +102,11 @@ tools backed by [Tavily](https://docs.tavily.com) instead of Claude's built-in w
 `TAVILY_API_KEY`; Tavily credits are billed by Tavily and are not included in `rootlogic usage`.
 `--no-profile` skips reading and learning your standing preferences for one run.
 `--block DOMAIN` / `--only DOMAIN` (repeatable) apply source rules to one run.
-`--verify-claims N` sets how many claims are checked against their pages (default 30,
-spread round-robin so every sub-task gets some checked), and
-`--no-verify` turns checking off.
+`--verify-claims N` sets how many claims are checked against their pages (default 30, spread
+round-robin so every sub-task gets some checked; the API accepts up to 120), and `--no-verify`
+turns checking off. Raising it costs wall clock rather than money: the verifier batches a
+finding's claims into one call, so a ten-sub-task run checking 30 claims instead of 12 made one
+extra call and cost the same, while verification itself went from 43s to 2m07s.
 `--worker-model MODEL` runs the research sub-agents on a cheaper model while planning,
 reflection, analysis, verification and writing stay on `--model`. Sub-agents make most of the
 calls and burn most of the tokens (330k of 636k in one live run), so this is the biggest cost
@@ -309,7 +311,7 @@ labels what it can't, and measures the result. The code lives in `rootlogic/veri
 
 | Guardrail | How it works | Model or code? |
 |---|---|---|
-| **Claim verification** | Each claim is checked against the text of the pages it cites, captured when sub-agents fetch them or fetched for the check. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. Missing, too-short or unusable page text (navigation, paywall, wrong page) means **unverifiable**, never "unsupported": failing to read a page says nothing about the claim. Claims that fail are withheld from the writer as fact. | model judges, code checks |
+| **Claim verification** | Thirty claims per run (`--verify-claims N`) are checked against the text of the pages they cite, captured when sub-agents fetch them or fetched for the check. The budget is spread round-robin across sub-tasks, so a ten-sub-task run checks three claims from each rather than all thirty from the first; the rest are labelled **unchecked** in the claim-check table, never assumed good. The verifier must quote the page verbatim; code confirms the quote is really in the text and downgrades "supported" if not. Missing, too-short or unusable page text (navigation, paywall, wrong page) means **unverifiable**, never "unsupported": failing to read a page says nothing about the claim. Claims that fail are withheld from the writer as fact. | model judges, code checks |
 | **Corroboration labels** | *corroborated* (2+ independent sites), *single source*, or *weak* (only low-credibility sources). Low-credibility sources can support a claim but never alone. | code |
 | **Source rules** | `rootlogic sources block/allow/trust/distrust <domain>`, `--block`/`--only` per run, or the web sidebar. Allow = allowlist mode. Trust/distrust override the model's credibility rating. Agents are told the rules, and code enforces them. | code |
 | **Links in the topic** | A URL you paste into the topic is read once, up front, and put through the same source rules as anything a sub-agent finds — a blocked domain is never fetched at all. The page is recorded in `sources`, its text goes into the evidence the verifier reads, and an excerpt is given to the planner. It stays untrusted web content: the researcher prompt forbids obeying instructions found in a fetched page. | code decides, model reads |

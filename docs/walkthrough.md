@@ -498,6 +498,13 @@ Three lessons from the first live runs, each now covered by a test:
   task slot. Sources that were retrieved and then *filtered* still count as a real result.
 
 Two design decisions worth explaining:
+- **The claim budget has to scale with the plan.** Twelve claims was a run's worth when plans
+  had three sub-tasks. A nine-sub-task live run made 64 claims and checked 12: "8 supported, 4
+  partly" described a fifth of the report and nothing on the page said so. The budget is 30 now,
+  and the evidence-fetch budget follows it at half the claims (floor six) - a claim whose cited
+  page was never fetched scores *unverifiable*, so raising one without the other would only have
+  bought a bigger pile of those. A ten-sub-task run then checked 30 of 74 claims with one
+  unverifiable, for one extra LLM call and no extra cost.
 - **Checks that fail never turn into passes.** If the verifier call errors, its claims stay
   "unchecked"; they're never marked supported by default.
 - **Turning verification off is visible.** With `--no-verify`, corroboration labels (free,
