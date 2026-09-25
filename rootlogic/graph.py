@@ -316,6 +316,10 @@ class ResearchGraph:
         decision = interrupt({"kind": "plan", "plan": s["plan"]})
         if not decision.get("approved"):
             self.store.update_session(self.sid, status="aborted")
+            # An abort closes whatever card the run is held on, so a rejection here may be
+            # an abandoned plan rather than a judged one. Say which in the log.
+            if self.control.aborting and self.control.claim_abort_notice():
+                self._emit("control.aborted", "Aborted by user")
             self._emit("session.aborted", "Aborted: plan rejected")
             return Command(goto=END, update={"status": "aborted"})
         plan = Plan.model_validate(decision["plan"])

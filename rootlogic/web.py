@@ -46,6 +46,11 @@ STATIC = Path(__file__).parent / "static"
 # =================================================================== run registry
 
 
+_STOP_ANSWER: dict[str, Any] = {"plan": {"approved": False},
+                                "override": {"commands": [{"action": "abort"}]}}
+"""What each kind of pending request is answered with when the run is aborted under it."""
+
+
 class Run:
     """One engine execution plus its replayable event stream and pending human request."""
 
@@ -96,6 +101,23 @@ class Run:
             answer = self._answer
         self.push({"type": "request.resolved", "request_id": rid, "kind": kind})
         return answer
+
+    def cancel_pending(self) -> bool:
+        """Unblock a request that is waiting on the user, and say whether there was one.
+
+        The engine thread sits inside ``request`` until the browser answers, so an abort flag
+        set while a card is open is recorded and never read: the run hangs on the card it was
+        told to abandon. Each kind gets the answer that means "stop" - a plan is rejected, an
+        override is told to abort, a question is skipped - and the abort flag the caller
+        already set stops the run once the thread is moving again.
+        """
+        with self._cond:
+            if not self.pending:
+                return False
+            self._answer = _STOP_ANSWER.get(self.pending["kind"], "")
+            self.pending = None
+            self._cond.notify_all()
+            return True
 
     def respond(self, request_id: str, answer: Any) -> None:
         with self._cond:
@@ -375,6 +397,9 @@ def create_app(store: Store, home: Path, *, engine_factory=None,
         run.engine.control.request_abort()
         run.push({"type": "control.requested", "message": "Abort requested — stopping at the "
                                                           "next sub-task boundary"})
+        if run.cancel_pending():
+            run.push({"type": "control.requested",
+                      "message": "Closed the card the run was waiting on"})
         return {"ok": True}
 
     # ------------------------------------------------------------- sessions (history)

@@ -100,6 +100,9 @@ class Orchestrator:
             self._clarify(topic, memory)
             plan = self._plan(topic, memory)
             reviewed = self.ui.review_plan(plan)
+            # An abort closes whatever card the run is held on, so a plan that comes back
+            # rejected may have been abandoned rather than judged. Say which in the log.
+            self._abort_if_requested()
             if reviewed is None:
                 raise Aborted("plan rejected")
             plan = reviewed

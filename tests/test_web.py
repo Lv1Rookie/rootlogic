@@ -564,3 +564,39 @@ def test_the_report_summary_heading_is_not_boardroom_english():
                   analysis=Analysis(consensus=[], contradictions=[])).to_markdown()
     assert "## In short" in text
     assert "Executive summary" not in text
+
+
+def test_abort_closes_an_open_override_card(client):
+    """A run held on a card is waiting on the browser, not on its own control flags: aborting
+    it has to answer the card too, or the run hangs on the thing it was told to abandon."""
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    client.post(f"/api/runs/{rid}/checkpoint")
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    wait(client, rid, pending("override"))
+
+    assert client.post(f"/api/runs/{rid}/abort").status_code == 200
+    s = wait(client, rid, finished)
+    assert s["status"] == "aborted" and s["pending"] is None
+
+
+@pytest.mark.parametrize("engine", ["loop", "graph"])
+def test_abort_closes_an_open_plan_card(client, engine):
+    rid = client.post("/api/runs", json={"topic": TOPIC, "engine": engine}).json()["run_id"]
+    wait(client, rid, pending("plan"))
+    assert client.post(f"/api/runs/{rid}/abort").status_code == 200
+    s = wait(client, rid, finished)
+    assert s["status"] == "aborted"
+    assert "control.aborted" in [e["type"] for e in sse_events(client, rid)]
+
+
+def test_abort_without_a_card_leaves_answering_alone(client):
+    """Nothing pending: the abort still works and reports no card was closed."""
+    rid = client.post("/api/runs", json={"topic": TOPIC}).json()["run_id"]
+    s = wait(client, rid, pending("plan"))
+    client.post(f"/api/runs/{rid}/answer", json={"request_id": s["pending"]["request_id"],
+                                                 "answer": {"approved": True}})
+    client.post(f"/api/runs/{rid}/abort")
+    s = wait(client, rid, finished)
+    assert s["status"] == "aborted"
