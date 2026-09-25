@@ -183,8 +183,10 @@ was a bug in its own right (Step 21):
 | **Abort** | this was a mistake | next sub-task boundary | ends, marked `aborted` |
 
 Override is the slowest of the three on purpose: it hands the user a plan to edit, and the plan
-is not stable until the wave that is rewriting it has finished. Abort has no plan to offer, so
-it never waits for one. `Control` keeps the three flags apart — a hold gate (`request_hold` /
+is not stable until the wave that is rewriting it has finished — up to four minutes on a wide
+plan, so the button says "Stopping…" while it waits rather than looking ignored. Abort has no
+plan to offer, so it never waits for one, and it answers whatever card the run is sitting on
+instead of queueing behind it. `Control` keeps the three flags apart — a hold gate (`request_hold` /
 `release`), a pause flag (`consume_pause`) and an abort flag — and announces a pause or an abort
 once however many sub-agent threads notice it at the same moment.
 
@@ -587,6 +589,9 @@ and each one is now covered by a test that fails against the old code.
 | Pause appeared to do nothing | tests call the engine directly and never wait | check the flag per sub-task, not per wave |
 | Abort could not be reached at all | no test drove the UI's control flow | its own button and endpoint, independent of Pause |
 | Abort took nine minutes to land | fakes succeed, so the failure path was never timed | check for an abort on that path too |
+| Override looked ignored for a whole wave | a test answers the card instantly; nobody watches the button | say "Stopping…" until the checkpoint lands |
+| Abort did nothing while a card was open | tests answer the card, then abort | aborting answers the open card too |
+| Abort closed one card and the next one opened | the fake clarifier asks one question | an aborting run puts up no card at all |
 
 Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
 path — a graded requirement, passing its unit tests, doing nothing in production, because
@@ -602,9 +607,10 @@ bound `p`. It could never have worked, and no mocked test built that lambda at a
 
 ### What pressing the buttons taught the controls
 
-The last three defects came from a different kind of live test: not "does the research work"
-but "can I stop it". All three were invisible to the suite because a test calls
-`engine.run()` and waits for it to return — nobody is sitting there pressing anything.
+Six defects came from a different kind of live test: not "does the research work" but "can I
+stop it". All six were invisible to the suite because a test calls `engine.run()` and waits for
+it to return — nobody is sitting there pressing anything, and nobody is watching what the page
+does while they wait.
 
 **Pause looked broken because it was checked once per wave.** A wave is one model call per
 sub-task, which on a hosted model is a minute and on a local 8B model is twenty. The flag was
@@ -643,9 +649,39 @@ in-flight model call — that request cannot be cancelled, so one sub-task is th
 fast Abort can possibly be. The regression test reproduces the live conditions exactly: every
 sub-task fails, and the assertion is that no further research calls happen after the abort.
 
+Three more turned up the next time the buttons were pressed in anger, and all three are the
+same shape: the flag was read correctly, and the *user* was left with no way to know.
+
+**Override said nothing for three minutes fifty-one.** Asking for an override queues a request
+and the engine honours it at the end of the wave it is in — correct, and indistinguishable from
+a dead button. The click was pressed twice, which the log recorded faithfully as two
+`control.requested` lines for one intent. The button now reads "Stopping…" and is disabled
+until the checkpoint lands, which on the live run that found it meant 3m51s of visible waiting
+instead of 3m51s of apparent nothing. The same state covers the plan table's Skip and Steer,
+which ask for a checkpoint by the same route.
+
+**Abort did nothing at all while a card was open.** A run held on a plan or override card is
+blocked on the browser, not on its own control flags: the abort endpoint set the flag, logged
+that it had, and the run went on sitting on the card it had just been told to abandon. Only the
+card's *own* Abort worked — the same shape as the original "Abort lives inside the override
+card" bug, arrived at from the other direction. Aborting now answers the open card with
+whatever that kind means by "stop": a plan is rejected, an override is told to abort, a question
+is skipped.
+
+**And closing the card only made room for the next one.** Aborting under the first of three
+clarifying questions closed it, and the clarifier — which asks its questions back to back, with
+no abort check between them — immediately put the second up. The run kept collecting answers it
+had been told to abandon. The fix moved up a level: a run that is aborting no longer opens a
+card *at all*, so it covers every card either engine raises rather than the one that happened
+to be open when the button was pressed.
+
 The lesson generalises past this project. **A control-plane feature needs a test that races
 it**, because the interesting bugs live in the gap between "the flag is set" and "the code
-looks at the flag" — and that gap only exists while something else is running.
+looks at the flag" — and that gap only exists while something else is running. Its corollary,
+learned the harder way: **a control that is working invisibly is indistinguishable from one
+that is broken.** Two of the six control-plane defects here were only ever visible to someone
+watching a button, and the fix for both was to make the waiting legible rather than to make it
+shorter.
 
 The pattern worth taking away: **the tests all took the same path through the code.** Claude's
 hosted tools mean `search is None`, which skipped the client-side search branch, the fetcher,
