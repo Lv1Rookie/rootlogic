@@ -585,7 +585,7 @@ Every change went through the same routine:
 ## Step 21: Run it for real, on a laptop, for free
 
 176 mocked tests passed before the first live run. Then every real run broke something new.
-Twelve defects came out of live testing, none of them reachable by the test suite as it stood,
+Eighteen defects came out of live testing, none of them reachable by the test suite as it stood,
 and each one is now covered by a test that fails against the old code.
 
 | What broke | Why the tests missed it | Fix |
@@ -605,6 +605,9 @@ and each one is now covered by a test that fails against the old code.
 | Override looked ignored for a whole wave | a test answers the card instantly; nobody watches the button | say "Stopping…" until the checkpoint lands |
 | Abort did nothing while a card was open | tests answer the card, then abort | aborting answers the open card too |
 | Abort closed one card and the next one opened | the fake clarifier asks one question | an aborting run puts up no card at all |
+| Seven of twelve fetches were gov.uk URLs the model had composed | StaticSearch answers any URL you ask it for | refuse a fetch of a URL no search returned |
+| Every gov.uk document stayed out of reach, so the run cited trade press and social posts | fixtures hand back whatever source the test wants | let a search be restricted to a publisher's site |
+| Facebook and Instagram posts carried government deadlines at the model's own credibility rating | no fixture cites a social post | rate those platforms low by default |
 
 Two of those were serious. **The outdated-source filter was silently inert** on the Tavily
 path — a graded requirement, passing its unit tests, doing nothing in production, because
@@ -695,6 +698,64 @@ learned the harder way: **a control that is working invisibly is indistinguishab
 that is broken.** Two of the six control-plane defects here were only ever visible to someone
 watching a button, and the fix for both was to make the waiting legible rather than to make it
 shorter.
+
+### Where a sub-agent's sources come from
+
+A run on UK petrol-ban policy produced a readable report with the primary source missing from
+it. Twelve of its fetches failed; seven were gov.uk addresses the model had assembled from
+headlines - `plans-confirmed-to-phase-out-sale-of-new-petrol-and-diesel-cars-by-2030` and the
+like - and curl confirmed every one a 404. The one gov.uk link an actual search returned read
+fine, and Tavily's extractor reads gov.uk without complaint, so neither the fetcher nor the site
+was at fault. The model was writing addresses that looked right.
+
+Three findings, each of which needed the one before it:
+
+**Refusing the guesses.** The prompt was told not to invent URLs, which a model can ignore, so
+the toolbox enforces it: every URL a sub-agent has been shown already passes through
+``WebToolbox`` - search results, and the pages it fetches - so it can say no to the rest. Seen
+covers a page's own links too, because the prompt tells the researcher to fetch the real
+document when a landing page comes back and that link is in the text, and it covers links from
+the topic, because a pasted URL is as good a reason to read a page as a search result. A
+refusal is not charged against the fetch budget: it bought nothing, and the turn cap already
+bounds a model that keeps guessing.
+
+**But the guessing was a symptom.** The next run refused two invented URLs and still cited one
+official source, a US Federal Register page, for a question about UK policy. The sub-agents
+were composing gov.uk addresses because gov.uk documents were not coming back from search, and
+removing the workaround does not remove the need. ``web_search`` now takes ``domains``: up to
+three sites to restrict results to, and a restricted search asks Tavily for its *advanced*
+pass, because a narrow haystack searched shallowly returns the section page rather than the
+document. The researcher prompt points at it from the sentence that forbids inventing a URL, so
+the instruction arrives where the temptation does.
+
+**And what it fell back on in the meantime.** Deprived of primary sources, the run cited
+Facebook, Instagram and LinkedIn posts for government deadlines, several rated credible by the
+model. Those platforms are now rated low whatever the model thought - a rating, not a ban,
+since a minister does announce policy on X, and corroboration already allows a low-credibility
+source to support a claim as long as it is not the only one. A latent bug surfaced here:
+credibility was only adjusted when the user had source rules, so a run with none skipped the
+ratings entirely.
+
+The same topic, three times, at the same budgets:
+
+| | before | refusing guesses | plus site search |
+|---|---|---|---|
+| invented URLs fetched | 8 | 0 (2 refused) | 0 |
+| official gov.uk sources | 0 | 0 | 3 |
+| claims supported | 11 | 11 | 21 |
+| unverifiable | 7 | 11 | 2 |
+
+The third run searched `"ZEV mandate consultation DfT 2026" (on gov.uk)`, got back the real
+consultation - the document the first run had tried to invent an address for - and read it. The
+verification numbers follow from that: claims cited to documents that actually read can be
+checked, and claims cited to social posts cannot. The middle column is worth keeping in view,
+because it is what a half-fix looks like: the guard was working exactly as designed and the
+report was no better for it.
+
+The lesson is about where a guardrail belongs. **Stopping a model from doing the wrong thing
+only helps if it can do the right thing instead** - otherwise the run finds a worse workaround,
+and the metric that was supposed to improve gets worse (unverifiable went 7 to 11 before it
+went to 2).
 
 The pattern worth taking away: **the tests all took the same path through the code.** Claude's
 hosted tools mean `search is None`, which skipped the client-side search branch, the fetcher,
