@@ -50,7 +50,7 @@ from .llm import LLM, AgentRefusal, AuthError, LLMError
 from .models import (Analysis, Clarification, Credibility, Finding, FindingDraft, Plan,
                      PlanDraft, Reflection, Report, ReportDraft, SearchHit, SourceDraft, SubTask,
                      SubTaskDraft)
-from .orchestrator import MAX_SEED_LINKS, SEED_EXCERPT, Budget
+from .orchestrator import MAX_SEED_LINKS, SEED_EXCERPT, Budget, _nothing_found
 from .search import clip
 from .store import Store
 from .tracing import NullTracer, Tracer
@@ -482,6 +482,11 @@ class ResearchGraph:
 
     def analyze(self, s: ResearchState) -> dict:
         plan = Plan.model_validate(s["plan"])
+        if not self._findings(s):
+            # See Orchestrator._analyze: asked to compare nothing, the model obliges from
+            # memory.
+            self._emit("analyze.skipped", "Nothing was retrieved, so there is nothing to compare")
+            return {"report": {"analysis": Analysis(consensus=[], contradictions=[]).model_dump()}}
         self._emit("analyze.started", "Cross-checking sources for consensus and contradictions")
         analysis = self.llm.structured(purpose="analyze", system=prompts.ANALYST, schema=Analysis,
                                        prompt=ctx.findings_block(plan, self._findings(s),
@@ -494,11 +499,16 @@ class ResearchGraph:
         plan = Plan.model_validate(s["plan"])
         findings = self._findings(s)
         analysis = Analysis.model_validate(s["report"]["analysis"])
-        self._emit("report.started", "Writing the final report to the Result tab")
-        prompt = (ctx.findings_block(plan, findings, s.get("context", []))
-                  + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
-        draft = self.llm.structured(purpose="report", system=self.prompts.writer, prompt=prompt,
-                                    schema=ReportDraft)
+        if findings:
+            self._emit("report.started", "Writing the final report to the Result tab")
+            prompt = (ctx.findings_block(plan, findings, s.get("context", []))
+                      + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
+            draft = self.llm.structured(purpose="report", system=self.prompts.writer,
+                                        prompt=prompt, schema=ReportDraft)
+        else:
+            self._emit("report.empty",
+                       "Nothing was retrieved; reporting that instead of writing a report")
+            draft = _nothing_found(plan)
         sources = ctx.all_sources(findings)
         checks = [c for f in findings for c in f.checks]
         quality = verify.check_report(draft, sources, checks, s.get("policy_drops", 0),

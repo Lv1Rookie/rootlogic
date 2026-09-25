@@ -403,6 +403,12 @@ class Orchestrator:
                    f"{c.get('unchecked', 0)} unchecked", counts=c, fetched=result.fetched)
 
     def _analyze(self, plan: Plan) -> Analysis:
+        if not self.findings:
+            # Asked to cross-check nothing, a capable model obliges from memory: live on
+            # claude-sonnet-5 with search down this returned four consensus points and two
+            # contradictions about a topic it had read not one page on.
+            self._emit("analyze.skipped", "Nothing was retrieved, so there is nothing to compare")
+            return Analysis(consensus=[], contradictions=[])
         self._emit("analyze.started", "Cross-checking sources for consensus and contradictions")
         analysis = self.llm.structured(purpose="analyze", system=prompts.ANALYST,
                                        prompt=self._findings_block(plan), schema=Analysis)
@@ -411,12 +417,20 @@ class Orchestrator:
         return analysis
 
     def _write(self, plan: Plan, analysis: Analysis) -> Report:
-        self._emit("report.started", "Writing the final report to the Result tab")
-        sources = self._all_sources()
-        prompt = (self._findings_block(plan)
-                  + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
-        draft = self.llm.structured(purpose="report", system=self.prompts.writer, prompt=prompt,
-                                    schema=ReportDraft)
+        if self.findings:
+            self._emit("report.started", "Writing the final report to the Result tab")
+            sources = self._all_sources()
+            prompt = (self._findings_block(plan)
+                      + "\n\nAnalysis:\n" + analysis.model_dump_json(indent=1))
+            draft = self.llm.structured(purpose="report", system=self.prompts.writer,
+                                        prompt=prompt, schema=ReportDraft)
+        else:
+            # Asked for a research report with nothing to report from, a capable model writes
+            # one anyway: the run that prompted this returned a fluent review of trials it had
+            # never retrieved. Saying so is not the model's to write, so code writes it.
+            self._emit("report.empty",
+                       "Nothing was retrieved; reporting that instead of writing a report")
+            sources, draft = [], _nothing_found(plan)
         checks = [c for f in self.findings.values() for c in f.checks]
         quality = verify.check_report(draft, sources, checks, self.policy_drops,
                                       self.prompts.customised)
@@ -576,6 +590,24 @@ class Orchestrator:
 
     def _save_plan(self, plan: Plan) -> None:
         self.store.update_session(self.sid, plan_json=plan.model_dump_json())
+
+
+def _nothing_found(plan: Plan) -> ReportDraft:
+    """The report for a run that retrieved nothing: what was attempted, and no claims."""
+    failed = [t for t in plan.subtasks if t.status == "failed"]
+    why = "; ".join(dict.fromkeys(t.error for t in failed if getattr(t, "error", ""))) \
+        or "no sub-task returned usable results"
+    return ReportDraft(
+        title=f"No sources found: {plan.objective}",
+        executive_summary=(
+            "This run retrieved no sources, so it has nothing to report about the topic. "
+            f"Every sub-task ended without usable results ({why}). Nothing here is a finding: "
+            "it is a record of what was attempted. Check the search backend, then retry."),
+        key_takeaways=[],
+        body_markdown="## What was attempted\n\n" + "\n".join(
+            f"- **{t.id}** — {t.question} · *{t.status}*" for t in plan.subtasks),
+        open_questions=[t.question for t in plan.subtasks][:5],
+        related_topics=[])
 
 
 def _slug(text: str) -> str:

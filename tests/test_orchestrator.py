@@ -510,3 +510,31 @@ def test_a_seed_url_on_a_blocked_domain_is_not_fetched(tmp_path):
     assert "https://spam.example/x" not in search.fetched, \
         "a blocked domain should not be reached at all"
     assert "seed.dropped" in ui.types()
+
+
+@pytest.mark.parametrize("kind", ["loop", "graph"])
+def test_a_run_that_found_nothing_says_so_instead_of_writing_from_memory(tmp_path, kind):
+    """Live on claude-sonnet-5 with search down: every sub-task failed, nothing was retrieved,
+    and the run still produced a confident review of PREDIMED and the Mediterranean diet -
+    four "consensus points", two "contradictions", and pages of prose, all from the model's
+    own memory. An assistant that cannot research a topic has to say so."""
+    from rootlogic.graph import ResearchGraph
+    from rootlogic.models import FindingDraft
+
+    def refuse(prompt):
+        raise LLMError("the model never ran a usable search, so there is nothing to report")
+
+    store, ui = Store(), ScriptedUI()
+    llm = FakeLLM(handlers={FindingDraft: refuse})
+    kw = dict(reports_dir=tmp_path, today=TODAY)
+    engine = (ResearchGraph(llm, store, ui, checkpoint_path=tmp_path / "cp.db", **kw)
+              if kind == "graph" else Orchestrator(llm, store, ui, **kw))
+    report = engine.run("does the Mediterranean diet reduce cardiovascular risk")
+
+    assert report is not None, "the run should finish and say what happened"
+    assert "analyze.done" not in ui.types(), "there is nothing to cross-check"
+    assert not [p for purpose, p in llm.calls if purpose == "report"], \
+        "the writer should not be asked to write a report out of nothing"
+    text = report.to_markdown().lower()
+    assert "no sources" in text or "nothing" in text or "no evidence" in text
+    assert "predimed" not in text, "no claims should appear that no source supported"
